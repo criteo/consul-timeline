@@ -50,7 +50,7 @@ func (s *Server) Serve() error {
 	s.serveStatic()
 
 	s.router.GET("/", func(w http.ResponseWriter, r *http.Request, ps httprouter.Params) {
-		http.Redirect(w, r, "/web/", 301)
+		http.Redirect(w, r, "/web/", http.StatusMovedPermanently)
 	})
 
 	s.router.GET("/events", func(w http.ResponseWriter, r *http.Request, ps httprouter.Params) {

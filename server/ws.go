@@ -108,7 +108,7 @@ func (w *ws) Remove(ws *websocket.Conn) {
 		return
 	}
 
-	ws.Close()
+	_ = ws.Close()
 	close(state.stop)
 	delete(w.conns, ws)
 }

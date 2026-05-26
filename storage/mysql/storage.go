@@ -130,7 +130,7 @@ func (s *Storage) Store(evt tl.Event) error {
 	return nil
 }
 
-func (s *Storage) Query(ctx context.Context, q storage.Query) ([]tl.Event, error) {
+func (s *Storage) Query(ctx context.Context, q storage.Query) (_ []tl.Event, err error) {
 	args := []interface{}{}
 	qs := `
 		SELECT
@@ -169,7 +169,11 @@ func (s *Storage) Query(ctx context.Context, q storage.Query) ([]tl.Event, error
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() {
+		if closeErr := rows.Close(); err == nil {
+			err = closeErr
+		}
+	}()
 
 	res := []tl.Event{}
 	for rows.Next() {

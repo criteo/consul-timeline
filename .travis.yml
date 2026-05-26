@@ -1,6 +1,6 @@
 language: go
 go:
-- 1.x
+- 1.25.3
 env: GO111MODULE=on
 script:
 - "./build/build ${TRAVIS_TAG}"

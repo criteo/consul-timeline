@@ -1,6 +1,6 @@
 module github.com/criteo/consul-timeline
 
-go 1.23
+go 1.25.3
 
 require (
 	github.com/NYTimes/gziphandler v1.1.1
