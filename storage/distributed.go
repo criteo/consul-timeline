@@ -2,48 +2,46 @@ package storage
 
 import (
 	"context"
+	"log/slog"
 	"sync"
 	"sync/atomic"
 	"time"
 
+	"github.com/hashicorp/consul/api"
+
 	"github.com/criteo/consul-timeline/consul"
 	tl "github.com/criteo/consul-timeline/timeline"
-	"github.com/hashicorp/consul/api"
-	log "github.com/sirupsen/logrus"
 )
 
 var _ Storage = (*Distributed)(nil)
 
+// Distributed lets several instances share one database: only the holder
+// of a Consul lock writes and runs maintenance, everyone reads.
 type Distributed struct {
 	consul *consul.Consul
 	inner  Storage
 
-	stop chan struct{}
-	done sync.WaitGroup
-
-	enabled uint32
+	stop   chan struct{}
+	done   sync.WaitGroup
+	leader atomic.Bool
 }
 
-func NewDistributed(consul *consul.Consul, inner Storage) *Distributed {
+func NewDistributed(c *consul.Consul, inner Storage) *Distributed {
 	s := &Distributed{
-		consul: consul,
+		consul: c,
 		inner:  inner,
 		stop:   make(chan struct{}),
 	}
-
 	go s.lockLoop()
-
 	return s
 }
 
 func (s *Distributed) lockLoop() {
-
 	var lock *api.Lock
-
 	for {
 		l, err := s.consul.Lock()
 		if err != nil {
-			log.Error(err)
+			slog.Error("storage lock", "err", err)
 			time.Sleep(time.Second)
 			continue
 		}
@@ -53,32 +51,28 @@ func (s *Distributed) lockLoop() {
 
 	for {
 		isLeaderGauge.Set(0)
-
-		log.Info("aquiring lock")
+		slog.Info("storage: acquiring lock")
 		lockChan, err := lock.Lock(nil)
-
 		if err != nil {
-			log.Error(err)
+			slog.Error("storage lock", "err", err)
 			time.Sleep(time.Second)
 			continue
 		}
 
-		log.Info("storage lock aquired")
+		slog.Info("storage: lock acquired, this instance writes")
 		isLeaderGauge.Set(1)
 		s.done.Add(1)
-		atomic.StoreUint32(&s.enabled, 1)
+		s.leader.Store(true)
 		select {
 		case <-lockChan:
-			atomic.StoreUint32(&s.enabled, 0)
-			log.Info("storage lock lost")
+			s.leader.Store(false)
+			slog.Info("storage: lock lost")
 			s.done.Done()
-
 		case <-s.stop:
-			atomic.StoreUint32(&s.enabled, 0)
-			log.Info("unlocking storage lock")
-			err := lock.Unlock()
-			if err != nil {
-				log.Error(err)
+			s.leader.Store(false)
+			slog.Info("storage: releasing lock")
+			if err := lock.Unlock(); err != nil {
+				slog.Error("storage unlock", "err", err)
 			}
 			s.done.Done()
 			return
@@ -91,15 +85,53 @@ func (s *Distributed) Stop() {
 	s.done.Wait()
 }
 
-func (s *Distributed) Store(evt tl.Event) error {
-	if atomic.LoadUint32(&s.enabled) == 0 {
-		// we are not leader, frop the event
+func (s *Distributed) IsLeader() bool { return s.leader.Load() }
+
+func (s *Distributed) StoreEvents(ctx context.Context, events []tl.Event) error {
+	if !s.leader.Load() {
 		return nil
 	}
-
-	return s.inner.Store(evt)
+	return s.inner.StoreEvents(ctx, events)
 }
 
-func (s *Distributed) Query(ctx context.Context, q Query) ([]tl.Event, error) {
-	return s.inner.Query(ctx, q)
+func (s *Distributed) UpsertInstances(ctx context.Context, instances []tl.Instance) error {
+	if !s.leader.Load() {
+		return nil
+	}
+	return s.inner.UpsertInstances(ctx, instances)
+}
+
+func (s *Distributed) Maintain(ctx context.Context) error {
+	if !s.leader.Load() {
+		return nil
+	}
+	return s.inner.Maintain(ctx)
+}
+
+func (s *Distributed) Events(ctx context.Context, q Query) (Page, error) {
+	return s.inner.Events(ctx, q)
+}
+
+func (s *Distributed) Histogram(ctx context.Context, q Query, buckets int) ([]Bucket, bool, error) {
+	return s.inner.Histogram(ctx, q, buckets)
+}
+
+func (s *Distributed) Facets(ctx context.Context, q Query, fields []string, limit int) (Facets, error) {
+	return s.inner.Facets(ctx, q, fields, limit)
+}
+
+func (s *Distributed) Suggest(ctx context.Context, dc, field, prefix string, limit int) ([]string, error) {
+	return s.inner.Suggest(ctx, dc, field, prefix, limit)
+}
+
+func (s *Distributed) Instance(ctx context.Context, dc, node, serviceID string) (*tl.Instance, error) {
+	return s.inner.Instance(ctx, dc, node, serviceID)
+}
+
+func (s *Distributed) Datacenters(ctx context.Context) ([]string, error) {
+	return s.inner.Datacenters(ctx)
+}
+
+func (s *Distributed) Since(ctx context.Context, dc string, after time.Time, limit int) ([]tl.Event, error) {
+	return s.inner.Since(ctx, dc, after, limit)
 }

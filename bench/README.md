@@ -95,7 +95,7 @@ to the local cluster's.
 ## Running the app on the host
 
 ```bash
-go run . -consul 127.0.0.1:8500 -storage mysql -mysql-host 127.0.0.1 -mysql-user timeline -mysql-password timeline -mysql-db consul_timeline_db -mysql-setup-schema -listen :8889
+go run . -consul 127.0.0.1:8500 -storage mysql -mysql-host 127.0.0.1 -mysql-user timeline -mysql-password timeline -mysql-db consul_timeline_db -mysql-setup-schema -mysql-legacy-table events -listen :8889
 ```
 
 Consul servers are discovered from the catalog and reached on their

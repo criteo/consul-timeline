@@ -28,15 +28,9 @@ jobs:
     - name: Test
       run: go test -v ./...
 
-    - name: Remove statik generated file to avoid gofmt failure
-      run: rm -f server/public/statik.go
-
     - name: Check code formatting using gofmt
       run: |
-        files="$(find . -name '*.go' \
-          -not -path './server/public/statik.go' \
-          -not -path './statik/statik.go' \
-          -exec gofmt -l {} +)"
+        files="$(gofmt -l .)"
         if [ -n "$files" ]; then
           echo "$files"
           exit 1

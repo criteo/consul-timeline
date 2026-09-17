@@ -1,15 +1,10 @@
 GOOS ?= linux
 GOARCH ?= amd64
 OUT ?= consul-timeline
+VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 
-deps:
-	go install github.com/rakyll/statik
-
-static: deps
-	statik -f -src=./public -dest=server/ -p public
-
-release: static
-	env GOOS=$(GOOS) GOARCH=$(GOARCH) CGO_ENABLED=0 go build -tags release -o $(OUT)
+release:
+	env GOOS=$(GOOS) GOARCH=$(GOARCH) CGO_ENABLED=0 go build -ldflags "-X main.version=$(VERSION)" -o $(OUT)
 
 # Local bench: MariaDB, a Consul cluster fed by the load generator, and the
 # app, see bench/README.md. A bench/.env (copied from bench/.env.example)
@@ -29,4 +24,4 @@ bench-logs:
 bench-down:
 	$(BENCH_COMPOSE) down -v
 
-.PHONY: static deps release bench-up bench-logs bench-down
+.PHONY: release bench-up bench-logs bench-down

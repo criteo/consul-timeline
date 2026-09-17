@@ -1,135 +1,140 @@
+// Package server exposes the timeline over HTTP: a JSON API, a live event
+// stream, the embedded web UI, and the operational endpoints.
 package server
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
+	"log/slog"
 	"net/http"
 	"net/http/pprof"
+	"strings"
+	"time"
 
 	"github.com/NYTimes/gziphandler"
-	"github.com/criteo/consul-timeline/storage"
-	tl "github.com/criteo/consul-timeline/timeline"
-	"github.com/gorilla/websocket"
-	"github.com/julienschmidt/httprouter"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
-	log "github.com/sirupsen/logrus"
+
+	"github.com/criteo/consul-timeline/storage"
 )
 
-type FilterEntriesProvider interface {
-	FilterEntries() []string
-}
-
-var upgrader = websocket.Upgrader{
-	ReadBufferSize:  1024,
-	WriteBufferSize: 1024,
+// Watch is what the server needs to know about the watcher.
+type Watch interface {
+	Datacenter() string
+	Ready() <-chan struct{}
+	ServiceNames() []string
+	NodeNames() []string
 }
 
 type Server struct {
-	listenAddr string
-
-	storage storage.Storage
-	router  *httprouter.Router
-
-	events   <-chan tl.Event
-	services FilterEntriesProvider
-
-	ws *ws
+	cfg           Config
+	store         storage.Storage
+	watch         Watch
+	hub           *Hub
+	version       string
+	retentionDays int
+	mux           *http.ServeMux
 }
 
-func New(cfg Config, storage storage.Storage, services FilterEntriesProvider, events <-chan tl.Event) *Server {
-	return &Server{
-		listenAddr: cfg.ListenAddr,
-		storage:    storage,
-		router:     httprouter.New(),
-		events:     events,
-		services:   services,
-		ws:         newWs(),
-	}
+// New builds the server; retentionDays is reported by /api/v1/meta so the
+// UI knows how far back history goes.
+func New(cfg Config, store storage.Storage, watch Watch, hub *Hub, version string, retentionDays int) *Server {
+	s := &Server{cfg: cfg, store: store, watch: watch, hub: hub, version: version, retentionDays: retentionDays}
+	s.routes()
+	return s
 }
 
-func (s *Server) Serve() error {
-	s.serveStatic()
-
-	s.router.GET("/", func(w http.ResponseWriter, r *http.Request, ps httprouter.Params) {
+func (s *Server) routes() {
+	m := http.NewServeMux()
+	m.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/web/", http.StatusMovedPermanently)
 	})
 
-	s.router.GET("/events", func(w http.ResponseWriter, r *http.Request, ps httprouter.Params) {
-		filter, err := filterFromQuery(r.URL.Query())
-		if err != nil {
-			http.Error(w, err.Error(), 400)
+	m.HandleFunc("GET /api/v1/meta", s.handleMeta)
+	m.HandleFunc("GET /api/v1/events", s.handleEvents)
+	m.HandleFunc("GET /api/v1/histogram", s.handleHistogram)
+	m.HandleFunc("GET /api/v1/facets", s.handleFacets)
+	m.HandleFunc("GET /api/v1/suggest", s.handleSuggest)
+	m.HandleFunc("GET /api/v1/instance", s.handleInstance)
+	m.HandleFunc("GET /api/v1/stream", s.handleStream)
+
+	// endpoints of the previous UI, kept until it is replaced
+	m.HandleFunc("GET /events", s.handleLegacyEvents)
+	m.HandleFunc("GET /filter-entries", s.handleLegacyFilterEntries)
+
+	m.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) { _, _ = w.Write([]byte("OK")) })
+	m.HandleFunc("GET /status", func(w http.ResponseWriter, r *http.Request) { _, _ = w.Write([]byte("OK")) })
+	m.HandleFunc("GET /readyz", s.handleReady)
+	m.Handle("GET /metrics", promhttp.Handler())
+	m.HandleFunc("GET /debug/pprof/", pprof.Index)
+	m.HandleFunc("GET /debug/pprof/cmdline", pprof.Cmdline)
+	m.HandleFunc("GET /debug/pprof/profile", pprof.Profile)
+	m.HandleFunc("GET /debug/pprof/symbol", pprof.Symbol)
+	m.HandleFunc("GET /debug/pprof/trace", pprof.Trace)
+
+	m.Handle("GET /web/", s.static())
+	s.mux = m
+}
+
+// Handler is the full HTTP handler: gzip everywhere except the stream,
+// which flushes small frames continuously.
+func (s *Server) Handler() http.Handler {
+	gz := gziphandler.GzipHandler(s.mux)
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, "/api/v1/stream") {
+			s.mux.ServeHTTP(w, r)
 			return
 		}
-
-		q := storage.Query{
-			Start:  filter.Start,
-			Filter: filter.Filter,
-			Limit:  filter.Limit,
-		}
-
-		events, err := s.storage.Query(r.Context(), q)
-		if err != nil {
-			log.Errorf("query error %s", err)
-			http.Error(w, err.Error(), 500)
-			return
-		}
-
-		err = json.NewEncoder(w).Encode(events)
-		if err != nil {
-			log.Errorf("encoding error %s", err)
-			http.Error(w, err.Error(), 500)
-			return
-		}
+		gz.ServeHTTP(w, r)
 	})
+}
 
-	s.router.GET("/filter-entries", func(w http.ResponseWriter, r *http.Request, ps httprouter.Params) {
-		err := json.NewEncoder(w).Encode(s.services.FilterEntries())
-		if err != nil {
-			log.Errorf("encoding error %s", err)
-			http.Error(w, err.Error(), 500)
-			return
-		}
-	})
-
-	s.router.GET("/ws", func(w http.ResponseWriter, r *http.Request, ps httprouter.Params) {
-		filter, err := filterFromQuery(r.URL.Query())
-		if err != nil {
-			http.Error(w, err.Error(), 400)
-			return
-		}
-
-		conn, err := upgrader.Upgrade(w, r, nil)
-		if err != nil {
-			log.Errorf("ws connection upgrade: %s", err)
-			return
-		}
-
-		s.ws.Add(conn, filter)
-	})
-
-	s.router.GET("/status", func(w http.ResponseWriter, r *http.Request, ps httprouter.Params) {
-		_, err := w.Write([]byte("OK"))
-		if err != nil {
-			log.Errorf("/status error %s", err)
-			http.Error(w, err.Error(), 500)
-			return
-		}
-	})
-
-	s.router.GET("/metrics", func(w http.ResponseWriter, r *http.Request, ps httprouter.Params) {
-		promhttp.Handler().ServeHTTP(w, r)
-	})
-
-	s.router.Handler("GET", "/debug/pprof/", http.HandlerFunc(pprof.Index))
-	s.router.Handler("GET", "/debug/pprof/cmdline", http.HandlerFunc(pprof.Cmdline))
-	s.router.Handler("GET", "/debug/pprof/profile", http.HandlerFunc(pprof.Profile))
-	s.router.Handler("GET", "/debug/pprof/symbol", http.HandlerFunc(pprof.Symbol))
-	s.router.Handler("GET", "/debug/pprof/trace", http.HandlerFunc(pprof.Trace))
-
+// Run serves until ctx is cancelled, then drains connections.
+func (s *Server) Run(ctx context.Context) error {
+	srv := &http.Server{
+		Addr:              s.cfg.ListenAddr,
+		Handler:           s.Handler(),
+		ReadHeaderTimeout: 10 * time.Second,
+	}
 	go func() {
-		for e := range s.events {
-			s.ws.Send(e)
-		}
+		<-ctx.Done()
+		s.hub.Close()
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = srv.Shutdown(shutdownCtx)
 	}()
+	slog.Info("http: listening", "addr", s.cfg.ListenAddr)
+	err := srv.ListenAndServe()
+	if errors.Is(err, http.ErrServerClosed) {
+		return nil
+	}
+	return err
+}
 
-	return http.ListenAndServe(s.listenAddr, gziphandler.GzipHandler(s.router))
+func (s *Server) handleReady(w http.ResponseWriter, r *http.Request) {
+	select {
+	case <-s.watch.Ready():
+	default:
+		http.Error(w, "watcher not ready", http.StatusServiceUnavailable)
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
+	defer cancel()
+	if _, err := s.store.Datacenters(ctx); err != nil {
+		http.Error(w, "storage: "+err.Error(), http.StatusServiceUnavailable)
+		return
+	}
+	_, _ = w.Write([]byte("OK"))
+}
+
+func writeJSON(w http.ResponseWriter, code int, v any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(code)
+	if err := json.NewEncoder(w).Encode(v); err != nil {
+		slog.Debug("http: encoding response", "err", err)
+	}
+}
+
+func writeError(w http.ResponseWriter, code int, err error) {
+	writeJSON(w, code, map[string]string{"error": err.Error()})
 }
