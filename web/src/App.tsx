@@ -9,9 +9,9 @@ import { RangePopover } from './components/RangePopover'
 import { TopBar } from './components/TopBar'
 import { useEvents, useFetch, useLive, useMeta, useTick } from './hooks'
 import { endsNow, filterString, parseState, rangeBounds, sameFilter, shiftRange, stateToSearch, zoomOut, type AppState } from './state'
-import { eventKey, type Event, type Filter, type Range } from './types'
+import { eventKey, type Event, type Filter, type Range, type Split } from './types'
 
-const FACET_FIELDS = ['kind', 'to', 'tag', 'team', 'service', 'node', 'check']
+const FACET_FIELDS = ['dc', 'kind', 'to', 'tag', 'team', 'service', 'node', 'check']
 const HISTOGRAM_BUCKETS = 72
 
 type Theme = 'light' | 'dark'
@@ -72,6 +72,8 @@ export default function App() {
   }, [])
 
   const isLive = state.live && endsNow(state.range) && !!meta && state.dc === meta.local_dc
+  const allDcs = state.dc === 'all'
+  const split: Split = allDcs ? state.split : 'status' // one datacenter has nothing to split by
   const queryKey = `${state.dc}|${JSON.stringify(state.range)}|${state.filters.map(filterString).join('&')}`
   const now = Date.now()
   const [from, to] = rangeBounds(state.range, now)
@@ -84,7 +86,7 @@ export default function App() {
 
   const events = useEvents(selection, queryKey)
   const refresh = isLive ? refreshTick : 0
-  const histogram = useFetch((signal) => getHistogram(selection, HISTOGRAM_BUCKETS, signal), queryKey, refresh)
+  const histogram = useFetch((signal) => getHistogram(selection, HISTOGRAM_BUCKETS, split, signal), `${queryKey}|${split}`, refresh)
   const facets = useFetch((signal) => getFacets(selection, FACET_FIELDS, 8, signal), queryKey, refresh)
 
   const onLiveEvent = useCallback(
@@ -99,16 +101,18 @@ export default function App() {
   // ---- actions --------------------------------------------------------------
 
   const update = (patch: Partial<AppState>) => setState((s) => ({ ...s, ...patch }))
-  const setFilters = (filters: Filter[]) => update({ filters })
-  const addFilter = (f: Filter) => setState((s) => (s.filters.some((x) => sameFilter(x, f)) ? s : { ...s, filters: [...s.filters, f] }))
+  // a dc filter only means something over every datacenter: it widens the scope
+  const scoped = (s: AppState, filters: Filter[]): AppState => ({ ...s, filters, dc: s.dc !== 'all' && filters.some((f) => f.field === 'dc') ? 'all' : s.dc })
+  const setFilters = (filters: Filter[]) => setState((s) => scoped(s, filters))
+  const addFilter = (f: Filter) => setState((s) => (s.filters.some((x) => sameFilter(x, f)) ? s : scoped(s, [...s.filters, f])))
   const toggleFilter = (field: string, value: string, not: boolean) =>
     setState((s) => {
       const i = s.filters.findIndex((f) => f.field === field && f.value === value)
-      if (i < 0) return { ...s, filters: [...s.filters, { field, value, not }] }
+      if (i < 0) return scoped(s, [...s.filters, { field, value, not }])
       const filters = [...s.filters]
       if (filters[i].not === not) filters.splice(i, 1)
       else filters[i] = { ...filters[i], not }
-      return { ...s, filters }
+      return scoped(s, filters)
     })
   const setRange = (range: Range) => {
     update({ range })
@@ -208,7 +212,18 @@ export default function App() {
         onShare={share}
         onHelp={() => setPopover((p) => (p === 'help' ? null : 'help'))}
       />
-      <Histogram data={histogram.data} from={from} to={to} tz={state.tz} loading={histogram.loading} onBrush={(a, b) => setRange({ kind: 'abs', from: a, to: b })} />
+      <Histogram
+        data={histogram.data}
+        from={from}
+        to={to}
+        tz={state.tz}
+        loading={histogram.loading}
+        split={split}
+        canSplit={allDcs}
+        datacenters={meta?.datacenters ?? []}
+        onBrush={(a, b) => setRange({ kind: 'abs', from: a, to: b })}
+        onSplit={(s) => update({ split: s })}
+      />
       <main className="layout">
         {facetsOpen && (
           <Facets
@@ -217,7 +232,7 @@ export default function App() {
             filters={state.filters}
             legacyCount={legacyCount}
             outageCount={outageCount}
-            allDatacenters={state.dc === 'all'}
+            allDatacenters={allDcs}
             onToggle={toggleFilter}
           />
         )}
@@ -237,7 +252,7 @@ export default function App() {
           onWiden={() => update({ range: zoomOut(state.range) })}
           onClearFilters={() => setFilters([])}
           hasFilters={state.filters.length > 0}
-          showDc={state.dc === 'all'}
+          showDc={allDcs}
         />
         {selected && (
           <Drawer

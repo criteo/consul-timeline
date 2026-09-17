@@ -58,6 +58,14 @@ func TestFiltersFacetsAndSince(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, page.Events, 1, "negated prefix match on any tag")
 
+	page, err = s.Events(ctx, storage.Query{Filters: []storage.Filter{{Field: storage.FieldDatacenter, Values: []string{"dc2"}}}})
+	require.NoError(t, err)
+	require.Len(t, page.Events, 1, "the datacenter is a filter field too")
+
+	buckets, _, err := s.Histogram(ctx, storage.Query{From: base.Add(-time.Minute), To: base.Add(time.Minute)}, 1, storage.SplitDatacenter)
+	require.NoError(t, err)
+	require.Equal(t, map[string]int{"dc1": 3, "dc2": 1}, buckets[0].By, "one bucket split by datacenter")
+
 	_, err = s.Events(ctx, storage.Query{Filters: []storage.Filter{{Field: "bogus", Values: []string{"x"}}}})
 	require.Error(t, err)
 

@@ -31,9 +31,9 @@ const legacyOrder = " ORDER BY time DESC, node_name, service_id, check_name"
 const legacyHeadline = "CASE WHEN check_name <> '' THEN new_check_status WHEN service_name <> '' THEN new_service_status ELSE new_node_status END"
 
 // conds renders the datacenter and the filters the legacy table can
-// evaluate: service, node and check names. complete reports whether every
-// filter and the text search were rendered, i.e. whether the SQL result
-// needs no further filtering.
+// evaluate: datacenter, service, node and check names. complete reports
+// whether every filter and the text search were rendered, i.e. whether the
+// SQL result needs no further filtering.
 func (l *legacyReader) conds(q storage.Query) (conds []string, args []any, complete bool) {
 	complete = q.Text == ""
 	if q.Datacenter != "" {
@@ -41,8 +41,8 @@ func (l *legacyReader) conds(q storage.Query) (conds []string, args []any, compl
 		args = append(args, q.Datacenter)
 	}
 	for _, f := range q.Filters {
-		col := map[string]string{storage.FieldService: "service_name", storage.FieldNode: "node_name", storage.FieldCheck: "check_name"}[f.Field]
-		if col == "" || f.Not {
+		col := map[string]string{storage.FieldDatacenter: "datacenter", storage.FieldService: "service_name", storage.FieldNode: "node_name", storage.FieldCheck: "check_name"}[f.Field]
+		if col == "" {
 			complete = false
 			continue
 		}
@@ -56,7 +56,11 @@ func (l *legacyReader) conds(q storage.Query) (conds []string, args []any, compl
 				args = append(args, v)
 			}
 		}
-		conds = append(conds, "("+strings.Join(parts, " OR ")+")")
+		sqlf := "(" + strings.Join(parts, " OR ") + ")"
+		if f.Not {
+			sqlf = "NOT " + sqlf
+		}
+		conds = append(conds, sqlf)
 	}
 	return conds, args, complete
 }
@@ -153,7 +157,7 @@ func (l *legacyReader) events(ctx context.Context, q storage.Query, before time.
 // histogram adds the legacy rows before the cutover to the buckets, when
 // the query only has filters the table can evaluate. It reports whether it
 // could contribute.
-func (l *legacyReader) histogram(ctx context.Context, q storage.Query, before, from time.Time, width time.Duration, add func(t time.Time, status tl.Status, count int)) (bool, error) {
+func (l *legacyReader) histogram(ctx context.Context, q storage.Query, before, from time.Time, width time.Duration, split storage.Split, add func(t time.Time, key string, count int)) (bool, error) {
 	upper := before.UTC()
 	if !q.To.IsZero() && q.To.Before(upper) {
 		upper = q.To.UTC()
@@ -167,7 +171,11 @@ func (l *legacyReader) histogram(ctx context.Context, q storage.Query, before, f
 	}
 	conds := append([]string{"time >= ?", "time < ?"}, fconds...)
 	args := append([]any{from.Unix(), int64(width / time.Second), from, upper}, fargs...)
-	sqlq := "SELECT FLOOR((UNIX_TIMESTAMP(time) - ?) / ?) AS b, " + legacyHeadline + " AS st, COUNT(*) FROM `" + l.table + "` WHERE " + strings.Join(conds, " AND ") + " GROUP BY b, st"
+	keyExpr := legacyHeadline
+	if split == storage.SplitDatacenter {
+		keyExpr = "datacenter"
+	}
+	sqlq := "SELECT FLOOR((UNIX_TIMESTAMP(time) - ?) / ?) AS b, " + keyExpr + " AS k, COUNT(*) FROM `" + l.table + "` WHERE " + strings.Join(conds, " AND ") + " GROUP BY b, k"
 	rows, err := l.db.QueryContext(ctx, sqlq, args...)
 	if err != nil {
 		return false, fmt.Errorf("mysql legacy histogram: %w", err)
@@ -175,12 +183,12 @@ func (l *legacyReader) histogram(ctx context.Context, q storage.Query, before, f
 	defer func() { _ = rows.Close() }()
 	for rows.Next() {
 		var b int64
-		var st sql.NullInt64
+		var key sql.NullString
 		var count int
-		if err := rows.Scan(&b, &st, &count); err != nil {
+		if err := rows.Scan(&b, &key, &count); err != nil {
 			return false, err
 		}
-		add(from.Add(time.Duration(b)*width), tl.Status(st.Int64), count)
+		add(from.Add(time.Duration(b)*width), splitKey(split, key.String), count)
 	}
 	return true, rows.Err()
 }

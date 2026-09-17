@@ -299,6 +299,41 @@ a {
 .bar.maint {
   fill: var(--maint);
 }
+/* one colour per datacenter, in the order the server lists them */
+:root {
+  --dc0: #2563eb;
+  --dc1: #0d9488;
+  --dc2: #d97706;
+  --dc3: #c2417d;
+  --dc4: #6d3fd6;
+  --dc5: #4d7c0f;
+  --dc6: #0891b2;
+  --dc7: #9a3412;
+}
+.bar.dc0 {
+  fill: var(--dc0);
+}
+.bar.dc1 {
+  fill: var(--dc1);
+}
+.bar.dc2 {
+  fill: var(--dc2);
+}
+.bar.dc3 {
+  fill: var(--dc3);
+}
+.bar.dc4 {
+  fill: var(--dc4);
+}
+.bar.dc5 {
+  fill: var(--dc5);
+}
+.bar.dc6 {
+  fill: var(--dc6);
+}
+.bar.dc7 {
+  fill: var(--dc7);
+}
 .brush {
   fill: var(--accent);
   opacity: 0.18;
@@ -355,6 +390,50 @@ a {
 }
 .legend i.maint {
   background: var(--maint);
+}
+.legend i.dc0 {
+  background: var(--dc0);
+}
+.legend i.dc1 {
+  background: var(--dc1);
+}
+.legend i.dc2 {
+  background: var(--dc2);
+}
+.legend i.dc3 {
+  background: var(--dc3);
+}
+.legend i.dc4 {
+  background: var(--dc4);
+}
+.legend i.dc5 {
+  background: var(--dc5);
+}
+.legend i.dc6 {
+  background: var(--dc6);
+}
+.legend i.dc7 {
+  background: var(--dc7);
+}
+.legend .split {
+  display: inline-flex;
+  gap: 2px;
+  margin-right: 6px;
+}
+.legend .split button {
+  font: inherit;
+  font-size: 10.5px;
+  line-height: 16px;
+  padding: 0 6px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+.legend .split button.on {
+  color: var(--text);
+  border-color: var(--text);
 }
 
 /* ---------- layout */

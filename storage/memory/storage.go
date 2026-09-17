@@ -114,7 +114,7 @@ func (s *Storage) Events(_ context.Context, q storage.Query) (storage.Page, erro
 	return page, nil
 }
 
-func (s *Storage) Histogram(_ context.Context, q storage.Query, buckets int) ([]storage.Bucket, bool, error) {
+func (s *Storage) Histogram(_ context.Context, q storage.Query, buckets int, split storage.Split) ([]storage.Bucket, bool, error) {
 	if err := q.Validate(); err != nil {
 		return nil, false, err
 	}
@@ -140,13 +140,13 @@ func (s *Storage) Histogram(_ context.Context, q storage.Query, buckets int) ([]
 	n := int((span + width - 1) / width)
 	out := make([]storage.Bucket, n)
 	for i := range out {
-		out[i] = storage.Bucket{Start: from.Add(time.Duration(i) * width), ByStatus: map[tl.Status]int{}}
+		out[i] = storage.Bucket{Start: from.Add(time.Duration(i) * width), By: map[string]int{}}
 	}
 	for _, e := range s.matching(q) {
 		i := int(e.Time.Sub(from) / width)
 		if i >= 0 && i < n {
 			out[i].Total++
-			out[i].ByStatus[e.NewStatus()]++
+			out[i].By[storage.BucketKey(e, split)]++
 		}
 	}
 	return out, false, nil

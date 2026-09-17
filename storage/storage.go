@@ -16,22 +16,23 @@ import (
 
 // Filter fields. Names are what the API and the UI use.
 const (
-	FieldService   = "service"
-	FieldNode      = "node"
-	FieldCheck     = "check"
-	FieldKind      = "kind"
-	FieldTag       = "tag" // any of the instance's service tags
-	FieldTeam      = "team"
-	FieldApp       = "app"
-	FieldVersion   = "version"
-	FieldCheckType = "type"
-	FieldTo        = "to"      // headline status after the event
-	FieldFrom      = "from"    // headline status before the event
-	FieldHealthy   = "healthy" // healthy instances after the event
+	FieldDatacenter = "dc"
+	FieldService    = "service"
+	FieldNode       = "node"
+	FieldCheck      = "check"
+	FieldKind       = "kind"
+	FieldTag        = "tag" // any of the instance's service tags
+	FieldTeam       = "team"
+	FieldApp        = "app"
+	FieldVersion    = "version"
+	FieldCheckType  = "type"
+	FieldTo         = "to"      // headline status after the event
+	FieldFrom       = "from"    // headline status before the event
+	FieldHealthy    = "healthy" // healthy instances after the event
 )
 
 // Fields lists every filterable field.
-var Fields = []string{FieldService, FieldNode, FieldCheck, FieldKind, FieldTag, FieldTeam, FieldApp, FieldVersion, FieldCheckType, FieldTo, FieldFrom, FieldHealthy}
+var Fields = []string{FieldDatacenter, FieldService, FieldNode, FieldCheck, FieldKind, FieldTag, FieldTeam, FieldApp, FieldVersion, FieldCheckType, FieldTo, FieldFrom, FieldHealthy}
 
 // Filter keeps events whose Field equals one of Values. A value ending in
 // "*" matches by prefix on name fields. Not inverts the filter.
@@ -98,12 +99,39 @@ type Page struct {
 	HasMore bool
 }
 
-// Bucket counts the events of one time slot by headline status after the
-// event.
+// Split says what a histogram bucket is broken down by.
+type Split string
+
+const (
+	SplitStatus     Split = "status" // headline status after the event
+	SplitDatacenter Split = "dc"
+)
+
+// ParseSplit reads the API's split parameter; "" means by status.
+func ParseSplit(s string) (Split, error) {
+	switch Split(s) {
+	case "", SplitStatus:
+		return SplitStatus, nil
+	case SplitDatacenter:
+		return SplitDatacenter, nil
+	}
+	return "", fmt.Errorf("unknown split %q", s)
+}
+
+// Bucket counts the events of one time slot, broken down by status name
+// or by datacenter according to the split.
 type Bucket struct {
-	Start    time.Time
-	Total    int
-	ByStatus map[tl.Status]int
+	Start time.Time
+	Total int
+	By    map[string]int
+}
+
+// BucketKey is the value an event counts under for a split.
+func BucketKey(e tl.Event, split Split) string {
+	if split == SplitDatacenter {
+		return e.Datacenter
+	}
+	return e.NewStatus().String()
 }
 
 type FacetValue struct {
@@ -127,8 +155,9 @@ type Writer interface {
 type Reader interface {
 	Events(ctx context.Context, q Query) (Page, error)
 	// Histogram splits the query range into about the requested number of
-	// buckets. The boolean reports whether the counts are sampled.
-	Histogram(ctx context.Context, q Query, buckets int) ([]Bucket, bool, error)
+	// buckets, each broken down by split. The boolean reports whether the
+	// counts are sampled.
+	Histogram(ctx context.Context, q Query, buckets int, split Split) ([]Bucket, bool, error)
 	Facets(ctx context.Context, q Query, fields []string, limit int) (Facets, error)
 	// Suggest completes a name field (service, node, check, team, app, tag) for one datacenter.
 	Suggest(ctx context.Context, dc, field, prefix string, limit int) ([]string, error)
@@ -167,7 +196,7 @@ func (f Filter) Validate() error {
 		return fmt.Errorf("filter %q has no value", f.Field)
 	}
 	switch f.Field {
-	case FieldService, FieldNode, FieldCheck, FieldTeam, FieldApp, FieldVersion, FieldCheckType, FieldTag:
+	case FieldDatacenter, FieldService, FieldNode, FieldCheck, FieldTeam, FieldApp, FieldVersion, FieldCheckType, FieldTag:
 	case FieldKind:
 		for _, v := range f.Values {
 			if _, ok := tl.ParseKind(v); !ok {
@@ -232,6 +261,8 @@ func (f Filter) match(e tl.Event) bool {
 
 func (f Filter) matchOne(e tl.Event, v string) bool {
 	switch f.Field {
+	case FieldDatacenter:
+		return MatchName(e.Datacenter, v)
 	case FieldService:
 		return MatchName(e.ServiceName, v)
 	case FieldNode:

@@ -112,8 +112,8 @@ func (s *Distributed) Events(ctx context.Context, q Query) (Page, error) {
 	return s.inner.Events(ctx, q)
 }
 
-func (s *Distributed) Histogram(ctx context.Context, q Query, buckets int) ([]Bucket, bool, error) {
-	return s.inner.Histogram(ctx, q, buckets)
+func (s *Distributed) Histogram(ctx context.Context, q Query, buckets int, split Split) ([]Bucket, bool, error) {
+	return s.inner.Histogram(ctx, q, buckets, split)
 }
 
 func (s *Distributed) Facets(ctx context.Context, q Query, fields []string, limit int) (Facets, error) {

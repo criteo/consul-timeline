@@ -152,7 +152,7 @@ func TestMySQLFiltersFacetsHistogram(t *testing.T) {
 	require.Equal(t, []storage.FacetValue{{Value: "http", Count: 2}, {Value: "kubernetes", Count: 2}, {Value: "marathon", Count: 2}, {Value: "tcp", Count: 2}}, facets.Values[storage.FieldTag])
 	require.Contains(t, facets.Values[storage.FieldTo], storage.FacetValue{Value: "missing", Count: 1})
 
-	buckets, sampled, err := s.Histogram(ctx, storage.Query{Datacenter: "dc1", From: from, To: base.Add(10 * time.Minute)}, 11)
+	buckets, sampled, err := s.Histogram(ctx, storage.Query{Datacenter: "dc1", From: from, To: base.Add(10 * time.Minute)}, 11, storage.SplitStatus)
 	require.NoError(t, err)
 	require.False(t, sampled)
 	total := 0
@@ -162,17 +162,32 @@ func TestMySQLFiltersFacetsHistogram(t *testing.T) {
 	require.Equal(t, 4, total, "direct histogram counts every dc1 event")
 
 	// the rollup path: no filters, span over six hours
-	buckets, _, err = s.Histogram(ctx, storage.Query{Datacenter: "dc1", From: base.Add(-7 * time.Hour), To: base.Add(time.Hour)}, 48)
+	buckets, _, err = s.Histogram(ctx, storage.Query{Datacenter: "dc1", From: base.Add(-7 * time.Hour), To: base.Add(time.Hour)}, 48, storage.SplitStatus)
 	require.NoError(t, err)
 	total = 0
 	for _, b := range buckets {
 		total += b.Total
-		require.Equal(t, b.Total, sum(b.ByStatus))
+		require.Equal(t, b.Total, sum(b.By))
 	}
 	require.Equal(t, 4, total, "rollup histogram agrees with the events")
+
+	// every datacenter, split by datacenter, a dc filter evaluated on the rollup
+	buckets, _, err = s.Histogram(ctx, storage.Query{From: base.Add(-7 * time.Hour), To: base.Add(time.Hour), Filters: []storage.Filter{{Field: storage.FieldDatacenter, Values: []string{"dc2"}, Not: true}}}, 48, storage.SplitDatacenter)
+	require.NoError(t, err)
+	by := map[string]int{}
+	for _, b := range buckets {
+		for k, n := range b.By {
+			by[k] += n
+		}
+	}
+	require.Equal(t, map[string]int{"dc1": 4}, by, "split by datacenter, dc2 excluded")
+
+	facets, err = s.Facets(ctx, storage.Query{From: from}, []string{storage.FieldDatacenter}, 10)
+	require.NoError(t, err)
+	require.Equal(t, []storage.FacetValue{{Value: "dc1", Count: 4}, {Value: "dc2", Count: 1}}, facets.Values[storage.FieldDatacenter])
 }
 
-func sum(m map[tl.Status]int) int {
+func sum(m map[string]int) int {
 	n := 0
 	for _, v := range m {
 		n += v
@@ -313,7 +328,7 @@ func TestMySQLLegacyContinuation(t *testing.T) {
 
 	// the histogram counts legacy rows too when the legacy table can evaluate the filters
 	total := func(q storage.Query) int {
-		buckets, _, err := s.Histogram(ctx, q, 20)
+		buckets, _, err := s.Histogram(ctx, q, 20, storage.SplitStatus)
 		require.NoError(t, err)
 		n := 0
 		for _, b := range buckets {
@@ -325,6 +340,17 @@ func TestMySQLLegacyContinuation(t *testing.T) {
 	require.Equal(t, 15, total(span), "3 v2 rows and 12 legacy rows")
 	span.Filters = []storage.Filter{{Field: storage.FieldNode, Values: []string{"n2"}}}
 	require.Equal(t, 3, total(span), "node filter pushed down to the legacy table")
+	span.Filters = []storage.Filter{{Field: storage.FieldNode, Values: []string{"n2"}, Not: true}}
+	require.Equal(t, 3+9, total(span), "negated filters are pushed down too")
 	span.Filters = []storage.Filter{{Field: storage.FieldTo, Values: []string{"critical"}}}
 	require.Equal(t, 2, total(span), "a filter the legacy table cannot evaluate leaves only v2 rows")
+
+	span.Filters = nil
+	buckets, _, err := s.Histogram(ctx, span, 20, storage.SplitDatacenter)
+	require.NoError(t, err)
+	n := 0
+	for _, b := range buckets {
+		n += b.By["dc1"]
+	}
+	require.Equal(t, 15, n, "legacy rows count under their datacenter in a dc split")
 }

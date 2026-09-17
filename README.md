@@ -132,7 +132,7 @@ All endpoints are `GET` and return JSON.
 |---|---|
 | `/api/v1/meta` | local datacenter, known datacenters, retention, filter fields |
 | `/api/v1/events` | events newest first, `cursor` continues a page |
-| `/api/v1/histogram` | event counts per time bucket |
+| `/api/v1/histogram` | event counts per time bucket, by status or by datacenter (`split=dc`) |
 | `/api/v1/facets` | top values per field for the current filters |
 | `/api/v1/suggest` | completions for a name field |
 | `/api/v1/instance` | registration of one instance (`dc`, `node`, `id`) |
@@ -142,16 +142,17 @@ Query parameters shared by events, histogram, facets and stream:
 
 | Parameter | Meaning |
 |---|---|
-| `dc` | datacenter; `all` or empty for every datacenter |
+| `dc` | datacenter; `all` or empty for every datacenter, which `f=dc:...` can narrow |
 | `from`, `to` | RFC 3339 or unix seconds/milliseconds; `to=now` |
 | `f` | filter `field:value`, repeatable; `-field:value` excludes; a trailing `*` matches a prefix |
 | `q` | free text over check output and names |
 | `limit`, `cursor` | paging |
 
-Filter fields: `service`, `node`, `check`, `kind` (check, instance, node),
-`tag` (any service tag of the instance), `team`, `app`, `version`, `type`
-(check type), `to` and `from` (status after and before the event),
-`healthy` (healthy instances after).
+Filter fields: `dc`, `service`, `node`, `check`, `kind` (check, instance,
+node), `tag` (any service tag of the instance), `team`, `app`, `version`,
+`type` (check type), `to` and `from` (status after and before the event),
+`healthy` (healthy instances after). Several values of one field are
+alternatives, so `f=dc:a&f=dc:b` compares two datacenters.
 
 The stream sends each event's time in milliseconds as the SSE id; a client
 reconnecting with `Last-Event-ID` (or `?since=`) receives the events it

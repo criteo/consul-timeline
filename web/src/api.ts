@@ -1,4 +1,4 @@
-import type { Bucket, Event, FacetValue, Filter, Instance, Meta } from './types'
+import type { Bucket, Event, FacetValue, Filter, Instance, Meta, Split } from './types'
 
 const BASE = '/api/v1'
 
@@ -64,12 +64,14 @@ export function getEvents(s: Selection, cursor: string | undefined, limit: numbe
 export interface HistogramResponse {
   bucket_seconds: number
   sampled: boolean
+  split: Split
   buckets: Bucket[]
 }
 
-export function getHistogram(s: Selection, buckets: number, signal?: AbortSignal): Promise<HistogramResponse> {
+export function getHistogram(s: Selection, buckets: number, split: Split, signal?: AbortSignal): Promise<HistogramResponse> {
   const p = selectionParams(s)
   p.set('buckets', String(buckets))
+  if (split !== 'status') p.set('split', split)
   return get<HistogramResponse>('/histogram', p, signal)
 }
 
