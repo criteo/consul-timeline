@@ -6,14 +6,9 @@ require (
 	github.com/NYTimes/gziphandler v1.1.1
 	github.com/ghodss/yaml v1.0.0
 	github.com/go-sql-driver/mysql v1.4.1
-	github.com/gorilla/websocket v1.4.0
 	github.com/hashicorp/consul v1.5.1
 	github.com/hashicorp/consul/api v1.1.0
-	github.com/julienschmidt/httprouter v1.2.0
-	github.com/pkg/errors v0.8.1
 	github.com/prometheus/client_golang v1.1.0
-	github.com/rakyll/statik v0.1.7
-	github.com/sirupsen/logrus v1.4.2
 	github.com/stretchr/testify v1.3.0
 )
 
@@ -44,7 +39,6 @@ require (
 	github.com/hashicorp/raft v1.0.1-0.20190409200437-d9fe23f7d472 // indirect
 	github.com/hashicorp/serf v0.8.2 // indirect
 	github.com/hashicorp/yamux v0.0.0-20181012175058-2f1d1f20f75d // indirect
-	github.com/konsorten/go-windows-terminal-sequences v1.0.1 // indirect
 	github.com/matttproud/golang_protobuf_extensions v1.0.1 // indirect
 	github.com/miekg/dns v1.0.14 // indirect
 	github.com/mitchellh/copystructure v0.0.0-20160804032330-cdac8253d00f // indirect

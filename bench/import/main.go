@@ -22,7 +22,6 @@ import (
 	_ "github.com/go-sql-driver/mysql"
 
 	mysqlstore "github.com/criteo/consul-timeline/storage/mysql"
-	tl "github.com/criteo/consul-timeline/timeline"
 )
 
 var (
@@ -35,6 +34,26 @@ var (
 	setup   = flag.Bool("setup-schema", true, "create the v1 schema in the bench database if missing")
 	timeout = flag.Duration("timeout", 2*time.Minute, "HTTP timeout per request")
 )
+
+// v1Event is the JSON the previous version serves on /events.
+type v1Event struct {
+	Time             time.Time `json:"time"`
+	Datacenter       string    `json:"datacenter"`
+	NodeName         string    `json:"node_name"`
+	NodeIP           string    `json:"node_ip"`
+	OldNodeStatus    int       `json:"old_node_status"`
+	NewNodeStatus    int       `json:"new_node_status"`
+	ServiceName      string    `json:"service_name"`
+	ServiceID        string    `json:"service_id"`
+	OldServiceStatus int       `json:"old_service_status"`
+	NewServiceStatus int       `json:"new_service_status"`
+	OldInstanceCount int       `json:"old_instance_count"`
+	NewInstanceCount int       `json:"new_instance_count"`
+	CheckName        string    `json:"check_name"`
+	OldCheckStatus   int       `json:"old_check_status"`
+	NewCheckStatus   int       `json:"new_check_status"`
+	CheckOutput      string    `json:"check_output"`
+}
 
 const insertSQL = `INSERT INTO events (
 	time, datacenter, node_name, node_ip, old_node_status, new_node_status,
@@ -58,7 +77,7 @@ func main() {
 		log.Fatalf("bench database: %v", err)
 	}
 	if *setup {
-		for _, q := range mysqlstore.Schema {
+		for _, q := range mysqlstore.LegacySchema {
 			if _, err := db.Exec(q); err != nil {
 				log.Fatalf("schema: %v", err)
 			}
@@ -82,7 +101,7 @@ func main() {
 		if err != nil {
 			log.Fatal(err)
 		}
-		fresh := make([]tl.Event, 0, len(evs))
+		fresh := make([]v1Event, 0, len(evs))
 		for _, e := range evs {
 			if !seen[key(e)] {
 				fresh = append(fresh, e)
@@ -116,7 +135,7 @@ func main() {
 	log.Printf("done: %d rows back to %s in %s", total, oldest.Format(time.RFC3339), time.Since(began).Round(time.Second))
 }
 
-func fetch(c *http.Client, start time.Time) ([]tl.Event, error) {
+func fetch(c *http.Client, start time.Time) ([]v1Event, error) {
 	u := fmt.Sprintf("%s/events?limit=%d&start=%d&filter=%s", strings.TrimRight(*source, "/"), *page, start.Unix(), url.QueryEscape(*filter))
 	resp, err := c.Get(u)
 	if err != nil {
@@ -126,14 +145,14 @@ func fetch(c *http.Client, start time.Time) ([]tl.Event, error) {
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("%s: %s", u, resp.Status)
 	}
-	var evs []tl.Event
+	var evs []v1Event
 	if err := json.NewDecoder(resp.Body).Decode(&evs); err != nil {
 		return nil, fmt.Errorf("%s: %w", u, err)
 	}
 	return evs, nil
 }
 
-func key(e tl.Event) string {
+func key(e v1Event) string {
 	return fmt.Sprintf("%d|%s|%s|%s|%s|%d%d%d%d%d%d%d%d|%s|%s",
 		e.Time.Unix(), e.NodeName, e.NodeIP, e.ServiceName, e.ServiceID,
 		e.OldNodeStatus, e.NewNodeStatus, e.OldServiceStatus, e.NewServiceStatus,
@@ -141,7 +160,7 @@ func key(e tl.Event) string {
 		e.CheckName, e.CheckOutput)
 }
 
-func insert(db *sql.DB, ins *sql.Stmt, evs []tl.Event) error {
+func insert(db *sql.DB, ins *sql.Stmt, evs []v1Event) error {
 	if len(evs) == 0 {
 		return nil
 	}

@@ -1,108 +1,147 @@
+// Command consul-timeline watches a Consul datacenter and records every
+// health transition, serving them live and from history.
 package main
 
 import (
+	"context"
+	"log/slog"
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/criteo/consul-timeline/consul"
-	"github.com/criteo/consul-timeline/storage"
-
-	_ "github.com/go-sql-driver/mysql"
-
 	"github.com/criteo/consul-timeline/server"
+	"github.com/criteo/consul-timeline/storage"
 	"github.com/criteo/consul-timeline/storage/memory"
 	"github.com/criteo/consul-timeline/storage/mysql"
 	tl "github.com/criteo/consul-timeline/timeline"
 	"github.com/criteo/consul-timeline/watch"
-	log "github.com/sirupsen/logrus"
 )
+
+// version is set at build time.
+var version = "dev"
 
 const (
-	eventsBuffer = 200
+	watchBuffer      = 10000  // events the watcher can queue before it waits
+	storageQueue     = 100000 // events waiting for the storage writer
+	maintainInterval = 10 * time.Minute
 )
-
-func dupEvents(in <-chan tl.Event) (<-chan tl.Event, <-chan tl.Event) {
-	o1 := make(chan tl.Event, eventsBuffer)
-	o2 := make(chan tl.Event, eventsBuffer)
-	go func() {
-		for e := range in {
-			o1 <- e
-			o2 <- e
-		}
-	}()
-
-	return o1, o2
-}
 
 func main() {
 	cfg := GetConfig()
-
 	if cfg.Mysql.PrintSchema {
 		mysql.PrintSchema()
 		return
 	}
+	setupLogging(cfg.LogLevel, cfg.LogFormat)
+	slog.Info("consul-timeline starting", "version", version)
 
-	logLvl, err := log.ParseLevel(cfg.LogLevel)
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	consulClient, err := consul.New(cfg.Consul)
 	if err != nil {
-		log.Fatal(err)
+		fatal(err)
 	}
 
-	log.SetLevel(logLvl)
-
-	// consul client
-	consul := consul.New(cfg.Consul)
-
-	// storage
 	var strg storage.Storage
-
 	switch cfg.Storage {
 	case mysql.Name:
-		strg, err = mysql.New(cfg.Mysql, consul.Datacenter)
+		strg, err = mysql.New(cfg.Mysql)
 		if err != nil {
-			log.Fatal(err)
+			fatal(err)
 		}
-	case memory.Name:
-		fallthrough
 	default:
-		log.Warnf("storing up to %d events in memory", cfg.Memory.MaxSize)
+		slog.Warn("storing events in memory only", "max", cfg.Memory.MaxSize)
 		strg = memory.New(cfg.Memory)
 	}
-
 	if cfg.Consul.EnableDistributedLock {
-		dstrg := storage.NewDistributed(consul, strg)
-		defer dstrg.Stop()
-		strg = dstrg
+		d := storage.NewDistributed(consulClient, strg)
+		defer d.Stop()
+		strg = d
 	}
-
 	strg = storage.NewMetrics(strg)
 
-	// consul watch
-	w := watch.New(consul, eventsBuffer)
-	events := w.Run()
+	w := watch.New(consulClient, cfg.Derive, watchBuffer)
+	hub := server.NewHub()
+	srv := server.New(cfg.Server, strg, w, hub, version, cfg.Mysql.RetentionDays)
+	serverErr := make(chan error, 1)
+	go func() { serverErr <- srv.Run(ctx) }()
 
-	storageEvents, apiEvents := dupEvents(events)
+	w.Run(ctx) // returns once the datacenter is known
 
-	// HTTP api
-	api := server.New(cfg.Server, strg, w, apiEvents)
+	// live events go to the stream hub at once and to storage in batches
+	toStorage := make(chan tl.Event, storageQueue)
 	go func() {
-		err := api.Serve()
-		if err != nil {
-			log.Fatal(err)
-		}
-	}()
-
-	go func() {
-		for e := range storageEvents {
-			err := strg.Store(e)
-			if err != nil {
-				log.Error(err)
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case e := <-w.Events():
+				hub.Publish(e)
+				select {
+				case toStorage <- e:
+				case <-ctx.Done():
+					return
+				}
 			}
 		}
 	}()
+	writerDone := make(chan struct{})
+	go func() {
+		storage.RunWriter(ctx, strg, toStorage, w.Instances(), storage.WriterConfig{})
+		close(writerDone)
+	}()
+	go maintain(ctx, strg)
 
-	c := make(chan os.Signal, 2)
-	signal.Notify(c, os.Interrupt, syscall.SIGTERM, syscall.SIGINT)
-	<-c
-	log.Info("stopping...")
+	if err := <-serverErr; err != nil {
+		fatal(err)
+	}
+	slog.Info("stopping")
+	select {
+	case <-writerDone:
+	case <-time.After(10 * time.Second):
+		slog.Warn("storage writer did not drain in time")
+	}
+}
+
+// maintain runs storage housekeeping periodically; the storage decides
+// whether this instance should actually do it.
+func maintain(ctx context.Context, m storage.Maintainer) {
+	t := time.NewTimer(30 * time.Second)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+		}
+		mctx, cancel := context.WithTimeout(ctx, maintainInterval)
+		if err := m.Maintain(mctx); err != nil {
+			slog.Error("storage maintenance", "err", err)
+		}
+		cancel()
+		t.Reset(maintainInterval)
+	}
+}
+
+func setupLogging(level, format string) {
+	var lvl slog.Level
+	if err := lvl.UnmarshalText([]byte(level)); err != nil {
+		lvl = slog.LevelInfo
+	}
+	opts := &slog.HandlerOptions{Level: lvl}
+	var h slog.Handler
+	if format == "json" {
+		h = slog.NewJSONHandler(os.Stderr, opts)
+	} else {
+		h = slog.NewTextHandler(os.Stderr, opts)
+	}
+	slog.SetDefault(slog.New(h))
+}
+
+func fatal(err error) {
+	slog.Error(err.Error())
+	os.Exit(1)
 }

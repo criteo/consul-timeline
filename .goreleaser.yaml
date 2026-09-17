@@ -2,17 +2,12 @@ version: 2
 
 project_name: consul-timeline
 
-before:
-  hooks:
-    - go install github.com/rakyll/statik
-    - statik -f -src=./public -dest=server/ -p public
-
 builds:
   - id: consul-timeline
     binary: consul-timeline
     main: .
-    flags:
-      - -tags=release
+    ldflags:
+      - -s -w -X main.version={{.Version}}
     env:
       - CGO_ENABLED=0
     goos:
