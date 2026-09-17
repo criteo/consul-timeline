@@ -3,6 +3,11 @@ GOARCH ?= amd64
 OUT ?= consul-timeline
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 
+# Build the web UI into public/dist, which go:embed packs into the binary.
+# Needs Node; the Go build works without it but then serves a notice at /web/.
+ui:
+	cd web && npm ci --no-audit --no-fund && npm run build
+
 release:
 	env GOOS=$(GOOS) GOARCH=$(GOARCH) CGO_ENABLED=0 go build -ldflags "-X main.version=$(VERSION)" -o $(OUT)
 
@@ -24,4 +29,4 @@ bench-logs:
 bench-down:
 	$(BENCH_COMPOSE) down -v
 
-.PHONY: release bench-up bench-logs bench-down
+.PHONY: ui release bench-up bench-logs bench-down

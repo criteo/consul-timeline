@@ -138,7 +138,7 @@ func (s *Server) handleStream(w http.ResponseWriter, r *http.Request) {
 	if !since.IsZero() {
 		missed, err := s.store.Since(r.Context(), q.Datacenter, since, replayLimit)
 		if err != nil {
-			writeFrame(w, "error", map[string]string{"error": err.Error()})
+			writeFrame(w, "warning", map[string]string{"error": err.Error()})
 		}
 		for _, e := range missed {
 			if storage.Match(e, q) {

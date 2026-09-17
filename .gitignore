@@ -1,3 +1,5 @@
 /consul-timeline
 /config.yaml
+/public/dist/*
+!/public/dist/.gitkeep
 /bench/.env

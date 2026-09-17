@@ -58,10 +58,6 @@ func (s *Server) routes() {
 	m.HandleFunc("GET /api/v1/instance", s.handleInstance)
 	m.HandleFunc("GET /api/v1/stream", s.handleStream)
 
-	// endpoints of the previous UI, kept until it is replaced
-	m.HandleFunc("GET /events", s.handleLegacyEvents)
-	m.HandleFunc("GET /filter-entries", s.handleLegacyFilterEntries)
-
 	m.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) { _, _ = w.Write([]byte("OK")) })
 	m.HandleFunc("GET /status", func(w http.ResponseWriter, r *http.Request) { _, _ = w.Write([]byte("OK")) })
 	m.HandleFunc("GET /readyz", s.handleReady)
