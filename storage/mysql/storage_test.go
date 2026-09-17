@@ -310,4 +310,21 @@ func TestMySQLLegacyContinuation(t *testing.T) {
 	page, err = s.Events(ctx, storage.Query{Datacenter: "dc1", From: legacyBase.Add(-time.Hour), Limit: 50, Filters: []storage.Filter{{Field: storage.FieldTo, Values: []string{"critical"}}, {Field: storage.FieldCheck, Values: []string{"check_1"}, Not: true}}})
 	require.NoError(t, err)
 	require.Len(t, page.Events, 2+9, "to:critical keeps 2 v2 rows and 9 of 12 legacy rows")
+
+	// the histogram counts legacy rows too when the legacy table can evaluate the filters
+	total := func(q storage.Query) int {
+		buckets, _, err := s.Histogram(ctx, q, 20)
+		require.NoError(t, err)
+		n := 0
+		for _, b := range buckets {
+			n += b.Total
+		}
+		return n
+	}
+	span := storage.Query{Datacenter: "dc1", From: legacyBase.Add(-time.Hour), To: now.Add(time.Second)}
+	require.Equal(t, 15, total(span), "3 v2 rows and 12 legacy rows")
+	span.Filters = []storage.Filter{{Field: storage.FieldNode, Values: []string{"n2"}}}
+	require.Equal(t, 3, total(span), "node filter pushed down to the legacy table")
+	span.Filters = []storage.Filter{{Field: storage.FieldTo, Values: []string{"critical"}}}
+	require.Equal(t, 2, total(span), "a filter the legacy table cannot evaluate leaves only v2 rows")
 }
