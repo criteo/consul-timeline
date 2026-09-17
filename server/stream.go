@@ -149,7 +149,7 @@ func (s *Server) handleStream(w http.ResponseWriter, r *http.Request) {
 			writeFrame(w, "gap", map[string]string{"error": "more events were missed than could be replayed"})
 		}
 	}
-	fmt.Fprint(w, ": connected\n\n")
+	_, _ = fmt.Fprint(w, ": connected\n\n")
 	flusher.Flush()
 
 	ping := time.NewTicker(pingInterval)
@@ -170,7 +170,7 @@ func (s *Server) handleStream(w http.ResponseWriter, r *http.Request) {
 			}
 			flusher.Flush()
 		case <-ping.C:
-			fmt.Fprint(w, ": ping\n\n")
+			_, _ = fmt.Fprint(w, ": ping\n\n")
 			flusher.Flush()
 		}
 	}
@@ -181,10 +181,10 @@ func writeEvent(w http.ResponseWriter, e tl.Event) {
 	if err != nil {
 		return
 	}
-	fmt.Fprintf(w, "id: %d\nevent: event\ndata: %s\n\n", e.Time.UnixMilli(), b)
+	_, _ = fmt.Fprintf(w, "id: %d\nevent: event\ndata: %s\n\n", e.Time.UnixMilli(), b)
 }
 
 func writeFrame(w http.ResponseWriter, event string, v any) {
 	b, _ := json.Marshal(v)
-	fmt.Fprintf(w, "event: %s\ndata: %s\n\n", event, b)
+	_, _ = fmt.Fprintf(w, "event: %s\ndata: %s\n\n", event, b)
 }

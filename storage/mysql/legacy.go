@@ -103,7 +103,7 @@ func (l *legacyReader) events(ctx context.Context, q storage.Query, before time.
 		for rows.Next() {
 			e, err := l.scanLegacy(rows)
 			if err != nil {
-				rows.Close()
+				_ = rows.Close()
 				return nil, storage.Cursor{}, false, err
 			}
 			fetched++
@@ -120,7 +120,7 @@ func (l *legacyReader) events(ctx context.Context, q storage.Query, before time.
 				out = append(out, e)
 			}
 		}
-		rows.Close()
+		_ = rows.Close()
 		if stopped {
 			hasMore = true
 			break

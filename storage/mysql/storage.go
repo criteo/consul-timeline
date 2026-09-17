@@ -86,7 +86,8 @@ func validIdentifier(s string) bool {
 		return false
 	}
 	for _, r := range s {
-		if !(r == '_' || r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9') {
+		ok := r == '_' || r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9'
+		if !ok {
 			return false
 		}
 	}
@@ -245,7 +246,7 @@ func (s *Storage) Maintain(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
 	var got sql.NullInt64
 	if err := conn.QueryRowContext(ctx, "SELECT GET_LOCK(?, 0)", maintainLock).Scan(&got); err != nil {
@@ -292,7 +293,7 @@ func (s *Storage) partitions(ctx context.Context, conn *sql.Conn) (map[string]bo
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	names := map[string]bool{}
 	for rows.Next() {
 		var n string
