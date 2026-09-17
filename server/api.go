@@ -185,15 +185,16 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 }
 
 type bucketJSON struct {
-	Time     time.Time      `json:"t"`
-	Total    int            `json:"total"`
-	ByStatus map[string]int `json:"by_status"`
+	Time  time.Time      `json:"t"`
+	Total int            `json:"total"`
+	By    map[string]int `json:"by"` // status names or datacenters, see Split
 }
 
 type histogramResponse struct {
-	BucketSeconds float64      `json:"bucket_seconds"`
-	Sampled       bool         `json:"sampled"`
-	Buckets       []bucketJSON `json:"buckets"`
+	BucketSeconds float64       `json:"bucket_seconds"`
+	Sampled       bool          `json:"sampled"`
+	Split         storage.Split `json:"split"`
+	Buckets       []bucketJSON  `json:"buckets"`
 }
 
 func (s *Server) handleHistogram(w http.ResponseWriter, r *http.Request) {
@@ -202,19 +203,24 @@ func (s *Server) handleHistogram(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
-	buckets, sampled, err := s.store.Histogram(r.Context(), q, intParam(r, "buckets", 60))
+	split, err := storage.ParseSplit(r.URL.Query().Get("split"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	buckets, sampled, err := s.store.Histogram(r.Context(), q, intParam(r, "buckets", 60), split)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
-	res := histogramResponse{Sampled: sampled, Buckets: make([]bucketJSON, 0, len(buckets))}
+	res := histogramResponse{Sampled: sampled, Split: split, Buckets: make([]bucketJSON, 0, len(buckets))}
 	if len(buckets) > 1 {
 		res.BucketSeconds = buckets[1].Start.Sub(buckets[0].Start).Seconds()
 	}
 	for _, b := range buckets {
-		bj := bucketJSON{Time: b.Start, Total: b.Total, ByStatus: map[string]int{}}
-		for st, n := range b.ByStatus {
-			bj.ByStatus[st.String()] = n
+		bj := bucketJSON{Time: b.Start, Total: b.Total, By: b.By}
+		if bj.By == nil {
+			bj.By = map[string]int{}
 		}
 		res.Buckets = append(res.Buckets, bj)
 	}

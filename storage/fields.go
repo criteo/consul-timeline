@@ -10,6 +10,8 @@ import (
 // form filters and facets use (enum names, not numbers).
 func FieldValue(e tl.Event, field string) string {
 	switch field {
+	case FieldDatacenter:
+		return e.Datacenter
 	case FieldService:
 		return e.ServiceName
 	case FieldNode:
@@ -49,4 +51,4 @@ func FieldValues(e tl.Event, field string) []string {
 }
 
 // FacetFields are the fields facets can be computed on.
-var FacetFields = []string{FieldKind, FieldTo, FieldTag, FieldTeam, FieldApp, FieldService, FieldNode, FieldCheck, FieldCheckType, FieldVersion}
+var FacetFields = []string{FieldDatacenter, FieldKind, FieldTo, FieldTag, FieldTeam, FieldApp, FieldService, FieldNode, FieldCheck, FieldCheckType, FieldVersion}

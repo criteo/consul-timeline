@@ -56,18 +56,19 @@ func parseTags(s string) ([]string, error) {
 }
 
 var columns = map[string]string{
-	storage.FieldService:   "service_name",
-	storage.FieldNode:      "node_name",
-	storage.FieldCheck:     "check_name",
-	storage.FieldTeam:      "team",
-	storage.FieldApp:       "app",
-	storage.FieldVersion:   "version",
-	storage.FieldCheckType: "check_type",
-	storage.FieldKind:      "kind",
-	storage.FieldTag:       "tags",
-	storage.FieldTo:        "new_status",
-	storage.FieldFrom:      "old_status",
-	storage.FieldHealthy:   "new_healthy",
+	storage.FieldDatacenter: "dc",
+	storage.FieldService:    "service_name",
+	storage.FieldNode:       "node_name",
+	storage.FieldCheck:      "check_name",
+	storage.FieldTeam:       "team",
+	storage.FieldApp:        "app",
+	storage.FieldVersion:    "version",
+	storage.FieldCheckType:  "check_type",
+	storage.FieldKind:       "kind",
+	storage.FieldTag:        "tags",
+	storage.FieldTo:         "new_status",
+	storage.FieldFrom:       "old_status",
+	storage.FieldHealthy:    "new_healthy",
 }
 
 func escapeLike(s string) string {
@@ -258,7 +259,7 @@ func (s *Storage) Since(ctx context.Context, dc string, after time.Time, limit i
 
 // ---- histogram ------------------------------------------------------------
 
-func (s *Storage) Histogram(ctx context.Context, q storage.Query, buckets int) ([]storage.Bucket, bool, error) {
+func (s *Storage) Histogram(ctx context.Context, q storage.Query, buckets int, split storage.Split) ([]storage.Bucket, bool, error) {
 	if err := q.Validate(); err != nil {
 		return nil, false, err
 	}
@@ -283,7 +284,12 @@ func (s *Storage) Histogram(ctx context.Context, q storage.Query, buckets int) (
 		width = time.Second
 	}
 
-	useRollup := len(q.Filters) == 0 && q.Text == "" && span >= rollupMinRange
+	// the rollup has the datacenter, so dc filters do not force the sampled scan
+	useRollup := rollupFilters(q.Filters) && q.Text == "" && span >= rollupMinRange
+	keyCol := "new_status"
+	if split == storage.SplitDatacenter {
+		keyCol = "dc"
+	}
 	if useRollup {
 		width = width.Truncate(time.Minute)
 		if width < time.Minute {
@@ -293,15 +299,15 @@ func (s *Storage) Histogram(ctx context.Context, q storage.Query, buckets int) (
 	n := int((span + width - 1) / width)
 	out := make([]storage.Bucket, n)
 	for i := range out {
-		out[i] = storage.Bucket{Start: from.Add(time.Duration(i) * width), ByStatus: map[tl.Status]int{}}
+		out[i] = storage.Bucket{Start: from.Add(time.Duration(i) * width), By: map[string]int{}}
 	}
-	add := func(t time.Time, status tl.Status, count int) {
+	add := func(t time.Time, key string, count int) {
 		i := int(t.Sub(from) / width)
 		if i < 0 || i >= n {
 			return
 		}
 		out[i].Total += count
-		out[i].ByStatus[status] += count
+		out[i].By[key] += count
 	}
 	// rows of the previous version's table count too, for the part of the
 	// range before the cutover, when its columns can evaluate the filters
@@ -311,7 +317,7 @@ func (s *Storage) Histogram(ctx context.Context, q storage.Query, buckets int) (
 		}
 		if s.legacy != nil {
 			if cut := s.cutover(ctx); from.Before(cut) {
-				if _, lerr := s.legacy.histogram(ctx, q, cut, from, width, add); lerr != nil {
+				if _, lerr := s.legacy.histogram(ctx, q, cut, from, width, split, add); lerr != nil {
 					return nil, false, lerr
 				}
 			}
@@ -325,27 +331,32 @@ func (s *Storage) Histogram(ctx context.Context, q storage.Query, buckets int) (
 			conds += " AND dc = ?"
 			args = append(args, q.Datacenter)
 		}
-		rows, err := s.db.QueryContext(ctx, "SELECT minute, new_status, SUM(n) FROM events_rollup WHERE "+conds+" GROUP BY minute, new_status", args...)
+		for _, f := range q.Filters { // dc filters only, see rollupFilters
+			sqlf, fargs := filterSQL(f)
+			conds += " AND " + sqlf
+			args = append(args, fargs...)
+		}
+		rows, err := s.db.QueryContext(ctx, "SELECT minute, "+keyCol+", SUM(n) FROM events_rollup WHERE "+conds+" GROUP BY minute, "+keyCol, args...)
 		if err != nil {
 			return nil, false, fmt.Errorf("mysql histogram: %w", err)
 		}
 		defer func() { _ = rows.Close() }()
 		for rows.Next() {
 			var minute time.Time
-			var status tl.Status
+			var key string
 			var count int
-			if err := rows.Scan(&minute, &status, &count); err != nil {
+			if err := rows.Scan(&minute, &key, &count); err != nil {
 				return nil, false, err
 			}
-			add(minute, status, count)
+			add(minute, splitKey(split, key), count)
 		}
 		return finish(false, rows.Err())
 	}
 
 	where, args := buildWhere(q, now)
 	sample := s.sample()
-	sqlq := "SELECT FLOOR((UNIX_TIMESTAMP(time) - ?) / ?) AS b, new_status, COUNT(*) FROM (SELECT time, new_status FROM events_v2 WHERE " + where +
-		" ORDER BY time DESC LIMIT ?) t GROUP BY b, new_status"
+	sqlq := "SELECT FLOOR((UNIX_TIMESTAMP(time) - ?) / ?) AS b, k, COUNT(*) FROM (SELECT time, " + keyCol + " AS k FROM events_v2 WHERE " + where +
+		" ORDER BY time DESC LIMIT ?) t GROUP BY b, k"
 	args = append([]any{from.Unix(), int64(width / time.Second)}, args...)
 	args = append(args, sample)
 	rows, err := s.db.QueryContext(ctx, sqlq, args...)
@@ -356,15 +367,36 @@ func (s *Storage) Histogram(ctx context.Context, q storage.Query, buckets int) (
 	total := 0
 	for rows.Next() {
 		var b int64
-		var status tl.Status
+		var key string
 		var count int
-		if err := rows.Scan(&b, &status, &count); err != nil {
+		if err := rows.Scan(&b, &key, &count); err != nil {
 			return nil, false, err
 		}
 		total += count
-		add(from.Add(time.Duration(b)*width), status, count)
+		add(from.Add(time.Duration(b)*width), splitKey(split, key), count)
 	}
 	return finish(total >= sample, rows.Err())
+}
+
+// rollupFilters reports whether the rollup table, which only carries the
+// datacenter among the filter columns, can evaluate every filter.
+func rollupFilters(filters []storage.Filter) bool {
+	for _, f := range filters {
+		if f.Field != storage.FieldDatacenter {
+			return false
+		}
+	}
+	return true
+}
+
+// splitKey turns the grouped column's text value into the bucket key: the
+// status name for a status split, the datacenter as is otherwise.
+func splitKey(split storage.Split, raw string) string {
+	if split == storage.SplitDatacenter {
+		return raw
+	}
+	n, _ := strconv.Atoi(raw)
+	return tl.Status(n).String()
 }
 
 func (s *Storage) sample() int {
@@ -391,7 +423,7 @@ func (s *Storage) Facets(ctx context.Context, q storage.Query, fields []string, 
 	where, args := buildWhere(q, time.Now())
 	sample := s.sample()
 	args = append(args, sample)
-	cols := "kind, new_status, team, app, version, service_name, node_name, check_name, check_type"
+	cols := "dc, kind, new_status, team, app, version, service_name, node_name, check_name, check_type"
 	wantTags := slices.Contains(fields, storage.FieldTag)
 	if wantTags {
 		cols += ", tags" // the one JSON column, fetched only when asked for
@@ -411,7 +443,7 @@ func (s *Storage) Facets(ctx context.Context, q storage.Query, fields []string, 
 		var e tl.Event
 		var headline tl.Status
 		var tags string
-		dest := []any{&e.Kind, &headline, &e.Team, &e.App, &e.Version, &e.ServiceName, &e.NodeName, &e.CheckName, &e.CheckType}
+		dest := []any{&e.Datacenter, &e.Kind, &headline, &e.Team, &e.App, &e.Version, &e.ServiceName, &e.NodeName, &e.CheckName, &e.CheckType}
 		if wantTags {
 			dest = append(dest, &tags)
 		}
@@ -483,6 +515,9 @@ func (s *Storage) Suggest(ctx context.Context, dc, field, prefix string, limit i
 	case storage.FieldCheck:
 		sqlq = "SELECT DISTINCT check_name FROM events_v2 WHERE " + dcCond("dc") + "check_name LIKE ? AND time > ? ORDER BY check_name LIMIT ?"
 		args = append(args, pattern, time.Now().Add(-24*time.Hour).UTC(), limit)
+	case storage.FieldDatacenter:
+		sqlq = "SELECT DISTINCT dc FROM instances WHERE dc LIKE ? ORDER BY dc LIMIT ?"
+		args = append(args, pattern, limit)
 	case storage.FieldTag:
 		sqlq = "SELECT DISTINCT jt.tag FROM instances i, JSON_TABLE(i.tags, '$[*]' COLUMNS (tag VARCHAR(255) PATH '$')) jt WHERE " + dcCond("i.dc") +
 			"i.tags IS NOT NULL AND jt.tag LIKE ? ORDER BY jt.tag LIMIT ?"

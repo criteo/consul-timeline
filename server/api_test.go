@@ -98,6 +98,16 @@ func TestEventsFacetsMeta(t *testing.T) {
 	require.Equal(t, 3, facets.SampleSize)
 	require.Equal(t, []storage.FacetValue{{Value: "check", Count: 2}, {Value: "instance", Count: 1}}, facets.Facets["kind"])
 
+	window := "&from=" + base.Add(-time.Minute).Format(time.RFC3339) + "&to=" + base.Add(time.Minute).Format(time.RFC3339)
+	var histo histogramResponse
+	require.Equal(t, 200, getJSON(t, ts, "/api/v1/histogram?dc=all&split=dc&buckets=1"+window, &histo))
+	require.Equal(t, storage.SplitDatacenter, histo.Split)
+	require.Equal(t, map[string]int{"dc1": 3, "dc2": 1}, histo.Buckets[0].By, "one bucket split by datacenter")
+	var filtered histogramResponse // a fresh value: decoding into a map keeps its old keys
+	require.Equal(t, 200, getJSON(t, ts, "/api/v1/histogram?dc=all&buckets=1&f=dc:dc2"+window, &filtered))
+	require.Equal(t, map[string]int{"critical": 1}, filtered.Buckets[0].By, "dc is a filter field, status is the default split")
+	require.Equal(t, 400, getJSON(t, ts, "/api/v1/histogram?split=bogus", &bad))
+
 	var meta metaResponse
 	require.Equal(t, 200, getJSON(t, ts, "/api/v1/meta", &meta))
 	require.Equal(t, "dc1", meta.LocalDatacenter)

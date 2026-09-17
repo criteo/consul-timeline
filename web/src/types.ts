@@ -116,10 +116,13 @@ export type Range =
   | { kind: 'around'; at: number; win: number }
   | { kind: 'abs'; from: number; to: number }
 
+// Split is what histogram buckets are broken down by
+export type Split = 'status' | 'dc'
+
 export interface Bucket {
   t: string
   total: number
-  by_status: Record<string, number>
+  by: Record<string, number> // status names or datacenters, per the split
 }
 
 export interface FacetValue {
@@ -127,9 +130,10 @@ export interface FacetValue {
   count: number
 }
 
-export const FILTER_KEYS = ['service', 'node', 'check', 'kind', 'to', 'from', 'tag', 'team', 'app', 'version', 'type', 'healthy'] as const
+export const FILTER_KEYS = ['dc', 'service', 'node', 'check', 'kind', 'to', 'from', 'tag', 'team', 'app', 'version', 'type', 'healthy'] as const
 
 export const KEY_HELP: Record<string, string> = {
+  dc: 'datacenter; several dc: chips compare them, history only',
   service: 'service name, * for a prefix',
   node: 'node name, * for a prefix',
   check: 'check name, * for a prefix',

@@ -42,8 +42,8 @@ export function Help({ onClose }: { onClose: () => void }) {
         </tbody>
       </table>
       <div className="hint">
-        Filters: <span className="mono">key:value</span>, prefix with <span className="mono">-</span> to exclude, <span className="mono">*</span> at the end for a prefix. Keys: service, node, check, kind, to, from, tag, team, app, version,
-        type, healthy. Plain text searches names and check output. Click a facet to keep only that value, alt-click to exclude it. Drag on the histogram to zoom.
+        Filters: <span className="mono">key:value</span>, prefix with <span className="mono">-</span> to exclude, <span className="mono">*</span> at the end for a prefix. Keys: dc, service, node, check, kind, to, from, tag, team, app, version,
+        type, healthy. Plain text searches names and check output. Click a facet to keep only that value, alt-click to exclude it. Drag on the histogram to zoom. With all DCs selected, dc: filters, the Datacenters facet and the histogram's datacenter split compare datacenters; the live tail stays per datacenter.
       </div>
     </div>
   )

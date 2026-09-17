@@ -1,4 +1,4 @@
-import type { Filter, Range } from './types'
+import type { Filter, Range, Split } from './types'
 import { FILTER_KEYS } from './types'
 
 // The whole view lives in the URL so any state can be shared.
@@ -8,6 +8,7 @@ export interface AppState {
   filters: Filter[]
   tz: 'local' | 'utc'
   live: boolean
+  split: Split // histogram breakdown, meaningful across datacenters
 }
 
 export const MIN = 60e3
@@ -110,6 +111,7 @@ export function parseState(search: string, localDc: string): AppState {
     filters,
     tz: p.get('tz') === 'utc' ? 'utc' : 'local',
     live: p.get('live') !== '0',
+    split: p.get('s') === 'dc' ? 'dc' : 'status',
   }
 }
 
@@ -123,5 +125,6 @@ export function stateToSearch(s: AppState): string {
   }
   if (s.tz === 'utc') p.set('tz', 'utc')
   if (!s.live) p.set('live', '0')
+  if (s.split === 'dc') p.set('s', 'dc')
   return '?' + p.toString()
 }

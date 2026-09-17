@@ -12,6 +12,7 @@ interface Props {
 }
 
 const GROUPS: [string, string][] = [
+  ['dc', 'Datacenters'],
   ['kind', 'Kind'],
   ['to', 'Transition to'],
   ['tag', 'Tags'],
@@ -55,7 +56,7 @@ export function Facets({ data, error, filters, legacyCount, outageCount, allData
       {data?.sampled && <div className="legacynote">Counts come from the {data.sample_size.toLocaleString()} most recent matching events.</div>}
       {GROUPS.map(([field, title]) => {
         const values = data?.facets[field] ?? []
-        if (!values.length) return null
+        if (!values.length || (field === 'dc' && !allDatacenters)) return null
         const top = values[0].count || 1
         return (
           <div className="fg" key={field}>

@@ -89,9 +89,9 @@ func (s *Metrics) Events(ctx context.Context, q Query) (Page, error) {
 	return s.inner.Events(ctx, q)
 }
 
-func (s *Metrics) Histogram(ctx context.Context, q Query, buckets int) ([]Bucket, bool, error) {
+func (s *Metrics) Histogram(ctx context.Context, q Query, buckets int, split Split) ([]Bucket, bool, error) {
 	defer observe("histogram", time.Now())
-	return s.inner.Histogram(ctx, q, buckets)
+	return s.inner.Histogram(ctx, q, buckets, split)
 }
 
 func (s *Metrics) Facets(ctx context.Context, q Query, fields []string, limit int) (Facets, error) {
