@@ -10,19 +10,17 @@ import (
 
 	"github.com/criteo/consul-timeline/consul"
 	"github.com/criteo/consul-timeline/server"
-	cass "github.com/criteo/consul-timeline/storage/cassandra"
 	"github.com/criteo/consul-timeline/storage/memory"
 	"github.com/criteo/consul-timeline/storage/mysql"
 )
 
 type Config struct {
-	LogLevel  string        `json:"log_level"`
-	Storage   string        `json:"storage"`
-	Consul    consul.Config `json:"consul"`
-	Server    server.Config `json:"server"`
-	Mysql     mysql.Config  `json:"mysql"`
-	Cassandra cass.Config   `json:"cassandra"`
-	Memory    memory.Config `json:"memory"`
+	LogLevel string        `json:"log_level"`
+	Storage  string        `json:"storage"`
+	Consul   consul.Config `json:"consul"`
+	Server   server.Config `json:"server"`
+	Mysql    mysql.Config  `json:"mysql"`
+	Memory   memory.Config `json:"memory"`
 }
 
 var DefaultConfig = Config{
@@ -33,19 +31,18 @@ var DefaultConfig = Config{
 var (
 	logLevelFlag    = flag.String("log-level", DefaultConfig.LogLevel, "(debug, info, warning, error, fatal)")
 	configFileFlag  = flag.String("config", "", "Config file path (yaml, json)")
-	storageFlag     = flag.String("storage", DefaultConfig.Storage, "Storage backend (mysql, cassandra, memory)")
+	storageFlag     = flag.String("storage", DefaultConfig.Storage, "Storage backend (mysql, memory)")
 	printConfigFlag = flag.Bool("print-config", false, "Print the configuration")
 )
 
 func FromFlags() Config {
 	cfg := Config{
-		LogLevel:  *logLevelFlag,
-		Storage:   *storageFlag,
-		Consul:    consul.ConfigFromFlags(),
-		Server:    server.ConfigFromFlags(),
-		Mysql:     mysql.ConfigFromFlags(),
-		Cassandra: cass.ConfigFromFlags(),
-		Memory:    memory.ConfigFromFlags(),
+		LogLevel: *logLevelFlag,
+		Storage:  *storageFlag,
+		Consul:   consul.ConfigFromFlags(),
+		Server:   server.ConfigFromFlags(),
+		Mysql:    mysql.ConfigFromFlags(),
+		Memory:   memory.ConfigFromFlags(),
 	}
 
 	return cfg
@@ -58,7 +55,6 @@ func GetConfig() Config {
 	cfg.Consul = consul.DefaultConfig
 	cfg.Server = server.DefaultConfig
 	cfg.Mysql = mysql.DefaultConfig
-	cfg.Cassandra = cass.DefaultConfig
 	cfg.Memory = memory.DefaultConfig
 
 	if *configFileFlag != "" {
