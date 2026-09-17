@@ -303,6 +303,21 @@ func (s *Storage) Histogram(ctx context.Context, q storage.Query, buckets int) (
 		out[i].Total += count
 		out[i].ByStatus[status] += count
 	}
+	// rows of the previous version's table count too, for the part of the
+	// range before the cutover, when its columns can evaluate the filters
+	finish := func(sampled bool, err error) ([]storage.Bucket, bool, error) {
+		if err != nil {
+			return nil, false, err
+		}
+		if s.legacy != nil {
+			if cut := s.cutover(ctx); from.Before(cut) {
+				if _, lerr := s.legacy.histogram(ctx, q, cut, from, width, add); lerr != nil {
+					return nil, false, lerr
+				}
+			}
+		}
+		return out, sampled, nil
+	}
 
 	if useRollup {
 		conds, args := "minute BETWEEN ? AND ?", []any{from.Truncate(time.Minute), to}
@@ -324,7 +339,7 @@ func (s *Storage) Histogram(ctx context.Context, q storage.Query, buckets int) (
 			}
 			add(minute, status, count)
 		}
-		return out, false, rows.Err()
+		return finish(false, rows.Err())
 	}
 
 	where, args := buildWhere(q, now)
@@ -349,7 +364,7 @@ func (s *Storage) Histogram(ctx context.Context, q storage.Query, buckets int) (
 		total += count
 		add(from.Add(time.Duration(b)*width), status, count)
 	}
-	return out, total >= sample, rows.Err()
+	return finish(total >= sample, rows.Err())
 }
 
 func (s *Storage) sample() int {
