@@ -22,6 +22,19 @@ var (
 		Buckets: prometheus.ExponentialBuckets(0.0005, 4, 9),
 	}, []string{"op"})
 
+	// The two histograms below predate the op label; recording rules and
+	// dashboards read them, so they stay.
+	writeHistogram = promauto.NewHistogram(prometheus.HistogramOpts{
+		Name:    "consul_timeline_storage_write_seconds",
+		Help:    "Event batch write latency",
+		Buckets: prometheus.ExponentialBuckets(0.0001, 4, 10),
+	})
+	readHistogram = promauto.NewHistogram(prometheus.HistogramOpts{
+		Name:    "consul_timeline_storage_read_seconds",
+		Help:    "Event query latency",
+		Buckets: prometheus.ExponentialBuckets(0.0001, 4, 10),
+	})
+
 	storedCounter = promauto.NewCounter(prometheus.CounterOpts{
 		Name: "consul_timeline_storage_events_stored_total",
 		Help: "Events written to storage",
@@ -49,7 +62,9 @@ func observe(op string, start time.Time) {
 }
 
 func (s *Metrics) StoreEvents(ctx context.Context, events []tl.Event) error {
-	defer observe("store_events", time.Now())
+	start := time.Now()
+	defer observe("store_events", start)
+	defer func() { writeHistogram.Observe(time.Since(start).Seconds()) }()
 	err := s.inner.StoreEvents(ctx, events)
 	if err == nil {
 		storedCounter.Add(float64(len(events)))
@@ -68,7 +83,9 @@ func (s *Metrics) Maintain(ctx context.Context) error {
 }
 
 func (s *Metrics) Events(ctx context.Context, q Query) (Page, error) {
-	defer observe("events", time.Now())
+	start := time.Now()
+	defer observe("events", start)
+	defer func() { readHistogram.Observe(time.Since(start).Seconds()) }()
 	return s.inner.Events(ctx, q)
 }
 
