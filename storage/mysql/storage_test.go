@@ -228,7 +228,7 @@ func TestMySQLMaintainPartitions(t *testing.T) {
 	s, ctx := testStorage(t)
 	conn, err := s.db.Conn(ctx)
 	require.NoError(t, err)
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
 	today := time.Now().UTC().Truncate(24 * time.Hour)
 	// pretend the table was created three weeks ago, then run today's maintenance

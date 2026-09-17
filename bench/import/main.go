@@ -141,7 +141,7 @@ func fetch(c *http.Client, start time.Time) ([]v1Event, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("%s: %s", u, resp.Status)
 	}

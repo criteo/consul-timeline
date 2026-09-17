@@ -203,7 +203,7 @@ func (s *Storage) Events(ctx context.Context, q storage.Query) (storage.Page, er
 		if err != nil {
 			return page, fmt.Errorf("mysql events: %w", err)
 		}
-		defer rows.Close()
+		defer func() { _ = rows.Close() }()
 		for rows.Next() {
 			e, err := scanEvent(rows)
 			if err != nil {
@@ -244,7 +244,7 @@ func (s *Storage) Since(ctx context.Context, dc string, after time.Time, limit i
 	if err != nil {
 		return nil, fmt.Errorf("mysql since: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var out []tl.Event
 	for rows.Next() {
 		e, err := scanEvent(rows)
@@ -264,7 +264,7 @@ func (s *Storage) Histogram(ctx context.Context, q storage.Query, buckets int) (
 	}
 	now := time.Now()
 	from, to := bounds(q, now)
-	if from == minTime {
+	if from.Equal(minTime) {
 		from = to.Add(-time.Hour)
 	}
 	if buckets <= 0 {
@@ -314,7 +314,7 @@ func (s *Storage) Histogram(ctx context.Context, q storage.Query, buckets int) (
 		if err != nil {
 			return nil, false, fmt.Errorf("mysql histogram: %w", err)
 		}
-		defer rows.Close()
+		defer func() { _ = rows.Close() }()
 		for rows.Next() {
 			var minute time.Time
 			var status tl.Status
@@ -337,7 +337,7 @@ func (s *Storage) Histogram(ctx context.Context, q storage.Query, buckets int) (
 	if err != nil {
 		return nil, false, fmt.Errorf("mysql histogram: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	total := 0
 	for rows.Next() {
 		var b int64
@@ -385,7 +385,7 @@ func (s *Storage) Facets(ctx context.Context, q storage.Query, fields []string, 
 	if err != nil {
 		return storage.Facets{}, fmt.Errorf("mysql facets: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	counts := make(map[string]map[string]int, len(fields))
 	for _, f := range fields {
@@ -479,7 +479,7 @@ func (s *Storage) Suggest(ctx context.Context, dc, field, prefix string, limit i
 	if err != nil {
 		return nil, fmt.Errorf("mysql suggest: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var out []string
 	for rows.Next() {
 		var v string
@@ -519,7 +519,7 @@ func (s *Storage) Datacenters(ctx context.Context) ([]string, error) {
 	if err != nil {
 		return nil, fmt.Errorf("mysql datacenters: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	seen := map[string]bool{}
 	var out []string
 	for rows.Next() {
