@@ -1,3 +1,4 @@
 .git
 consul-timeline
-server/public
+web/node_modules
+public/dist
