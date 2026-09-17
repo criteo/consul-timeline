@@ -100,19 +100,11 @@ mysql:
   purge_max_age_hours: 336 # 2 weeks
   setup_schema: false
 
-cassandra:
-  Addresses: []
-  Keyspace: consul_timeline
-
 ```
 
 ## Contributing
 
 ### To do
-
-* Cassandra storage
-  * Node filter
-  * Table max size
 
 * Handle server errors in UI
 

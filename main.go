@@ -11,7 +11,6 @@ import (
 	_ "github.com/go-sql-driver/mysql"
 
 	"github.com/criteo/consul-timeline/server"
-	cass "github.com/criteo/consul-timeline/storage/cassandra"
 	"github.com/criteo/consul-timeline/storage/memory"
 	"github.com/criteo/consul-timeline/storage/mysql"
 	tl "github.com/criteo/consul-timeline/timeline"
@@ -60,11 +59,6 @@ func main() {
 	switch cfg.Storage {
 	case mysql.Name:
 		strg, err = mysql.New(cfg.Mysql, consul.Datacenter)
-		if err != nil {
-			log.Fatal(err)
-		}
-	case cass.Name:
-		strg, err = cass.New(cfg.Cassandra)
 		if err != nil {
 			log.Fatal(err)
 		}
