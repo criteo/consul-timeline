@@ -1,0 +1,100 @@
+# Local bench for consul-timeline.
+#
+# MariaDB 10.11 (same major as the usual production target), a small Consul
+# cluster (one server plus two client agents so node-level events exist)
+# kept busy by a load generator, and the app built from this checkout.
+# To watch a real cluster instead, copy bench/.env.example to bench/.env
+# and set CONSUL_ADDR there; the Makefile passes that file to compose.
+# See bench/README.md.
+#
+#   make bench-up      # everything                  -> http://localhost:8888/web/
+#   make bench-logs
+#   make bench-down    # stop everything and delete the volumes
+name: consul-timeline-bench
+
+services:
+  mariadb:
+    image: mariadb:10.11
+    command:
+      - --innodb-buffer-pool-size=1G
+      - --max-connections=500
+    environment:
+      MARIADB_ROOT_PASSWORD: root
+      MARIADB_DATABASE: consul_timeline_db
+      MARIADB_USER: timeline
+      MARIADB_PASSWORD: timeline
+    ports:
+      - "127.0.0.1:3306:3306"
+    volumes:
+      - mariadb-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+
+  consul:
+    image: hashicorp/consul:1.22
+    command: agent -server -bootstrap-expect=1 -ui -client=0.0.0.0 -datacenter=bench -node=bench-server-1 -log-level=warn
+    ports:
+      - "127.0.0.1:8500:8500"
+
+  consul-agent-1:
+    image: hashicorp/consul:1.22
+    command: agent -retry-join=consul -client=0.0.0.0 -datacenter=bench -node=bench-node-1 -log-level=warn
+    ports:
+      - "127.0.0.1:8511:8500"
+    depends_on: [consul]
+
+  consul-agent-2:
+    image: hashicorp/consul:1.22
+    command: agent -retry-join=consul -client=0.0.0.0 -datacenter=bench -node=bench-node-2 -log-level=warn
+    ports:
+      - "127.0.0.1:8512:8500"
+    depends_on: [consul]
+
+  timeline:
+    build:
+      context: ..
+      dockerfile: bench/Dockerfile
+    image: consul-timeline:bench
+    command:
+      - consul-timeline
+      - -consul=${CONSUL_ADDR:-consul:8500}
+      - -consul-token=${CONSUL_TOKEN:-}
+      - -consul-datacenter=${CONSUL_DATACENTER:-}
+      - -derive-team=${DERIVE_TEAM:-team,owner,owners}
+      - -derive-app=${DERIVE_APP:-app,application}
+      - -derive-version=${DERIVE_VERSION:-version}
+      - -storage=mysql
+      - -mysql-host=mariadb
+      - -mysql-user=timeline
+      - -mysql-password=timeline
+      - -mysql-db=consul_timeline_db
+      - -mysql-setup-schema
+      - -listen=:8888
+      - -log-level=info
+    ports:
+      - "127.0.0.1:8888:8888"
+    depends_on:
+      mariadb:
+        condition: service_healthy
+      consul:
+        condition: service_started
+    restart: unless-stopped
+
+  loadgen:
+    image: consul-timeline:bench
+    build:
+      context: ..
+      dockerfile: bench/Dockerfile
+    command:
+      - bench-loadgen
+      - -agents=consul-agent-1:8500,consul-agent-2:8500,consul:8500
+      - -rate=${RATE:-15}
+      - -families=${FAMILIES:-40}
+      - -pods-per-family=${PODS:-6}
+    depends_on: [consul-agent-1, consul-agent-2]
+
+volumes:
+  mariadb-data:
