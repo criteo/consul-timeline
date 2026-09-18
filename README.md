@@ -50,6 +50,9 @@ mysql:
   database: consul_timeline
   setup_schema: true        # create the tables at startup
   retention_days: 14        # older daily partitions are dropped
+  # extra driver parameters; a server that authenticates through PAM
+  # needs the cleartext plugin, so only over TLS:
+  # params: tls=skip-verify&allowCleartextPasswords=true
 ```
 
 Print the schema with `consul-timeline -mysql-print-schema`. Events land in

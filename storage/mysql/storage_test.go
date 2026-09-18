@@ -354,3 +354,11 @@ func TestMySQLLegacyContinuation(t *testing.T) {
 	}
 	require.Equal(t, 15, n, "legacy rows count under their datacenter in a dc split")
 }
+
+func TestDSNParams(t *testing.T) {
+	cfg := Config{Host: "db", Port: 3306, User: "u", Password: "p", Database: "d", Params: "tls=skip-verify&allowCleartextPasswords=true"}
+	want := "u:p@tcp(db:3306)/d?parseTime=true&loc=UTC&charset=utf8mb4&interpolateParams=true&tls=skip-verify&allowCleartextPasswords=true"
+	if got := cfg.dsn(); got != want {
+		t.Fatalf("dsn = %q, want %q", got, want)
+	}
+}

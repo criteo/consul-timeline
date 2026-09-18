@@ -42,9 +42,7 @@ type Storage struct {
 
 // New opens the database and, when configured, creates the schema.
 func New(cfg Config) (*Storage, error) {
-	dsn := fmt.Sprintf("%s:%s@tcp(%s:%d)/%s?parseTime=true&loc=UTC&charset=utf8mb4&interpolateParams=true",
-		cfg.User, cfg.Password, cfg.Host, cfg.Port, cfg.Database)
-	db, err := sql.Open("mysql", dsn)
+	db, err := sql.Open("mysql", cfg.dsn())
 	if err != nil {
 		return nil, err
 	}
@@ -80,6 +78,15 @@ func New(cfg Config) (*Storage, error) {
 }
 
 func (s *Storage) Close() error { return s.db.Close() }
+
+func (cfg Config) dsn() string {
+	dsn := fmt.Sprintf("%s:%s@tcp(%s:%d)/%s?parseTime=true&loc=UTC&charset=utf8mb4&interpolateParams=true",
+		cfg.User, cfg.Password, cfg.Host, cfg.Port, cfg.Database)
+	if cfg.Params != "" {
+		dsn += "&" + cfg.Params
+	}
+	return dsn
+}
 
 func validIdentifier(s string) bool {
 	if s == "" || len(s) > 64 {
