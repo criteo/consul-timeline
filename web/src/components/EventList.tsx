@@ -104,7 +104,7 @@ const Row = memo(function Row({ e, prev, top, index, tz, selected, showDc, onSel
   return (
     <div
       id={`row-${index}`}
-      className={`row${grouped ? ' grp' : ''}${e.legacy ? ' legacy' : ''}${outage ? ' outage' : ''}${selected ? ' sel' : ''}`}
+      className={`row${grouped ? ' grp' : ''}${outage ? ' outage' : ''}${selected ? ' sel' : ''}`}
       style={{ transform: `translateY(${top}px)` }}
       onClick={() => onSelect(e)}
     >
@@ -138,11 +138,6 @@ const Row = memo(function Row({ e, prev, top, index, tz, selected, showDc, onSel
         <div className="l2">
           {e.kind !== KIND_NODE && (
             <>
-              {e.legacy && (
-                <span className="tag legacy" title="row from the previous version: fewer fields">
-                  legacy
-                </span>
-              )}
               {e.team && <span>{e.team}</span>}
               {e.version && <span>v{e.version}</span>}
             </>

@@ -74,14 +74,8 @@ consul:
 
 ### Upgrading from a version before 0.3
 
-Older versions wrote a flat `events` table. Point the new version at it and
-its rows stay readable, marked `legacy` in the API, until retention has
-purged them all; then drop the table and the setting.
-
-```yaml
-mysql:
-  legacy_table: events
-```
+Older versions wrote a flat `events` table. It is neither read nor purged
+any more; drop it.
 
 ### Full config reference
 
@@ -114,7 +108,6 @@ mysql:
   database: consul_timeline
   setup_schema: false
   retention_days: 14
-  legacy_table: ""
   facet_sample: 100000      # most recent matching rows scanned for facets
   max_open_conns: 16
 

@@ -17,13 +17,8 @@ type Config struct {
 	PrintSchema bool `json:"-"`
 
 	// RetentionDays bounds the history kept: older daily partitions are
-	// dropped, instances and rollups pruned, and the legacy table purged.
+	// dropped, instances and rollups pruned.
 	RetentionDays int `json:"retention_days"`
-	// LegacyTable, when set, is the table written by versions before 0.3.
-	// Its rows are served for times before the first v2 row and purged by
-	// retention, so history survives the upgrade and the table can be
-	// dropped once it is empty.
-	LegacyTable string `json:"legacy_table"`
 	// FacetSample caps the number of most recent matching rows scanned for
 	// facets and filtered histograms.
 	FacetSample  int `json:"facet_sample"`
@@ -43,7 +38,6 @@ var DefaultConfig = Config{
 	SetupSchema:   false,
 	PrintSchema:   false,
 	RetentionDays: 14,
-	LegacyTable:   "",
 	FacetSample:   100000,
 	MaxOpenConns:  16,
 }
@@ -61,7 +55,6 @@ func init() {
 	flag.StringVar(&flagConfig.Database, "mysql-db", DefaultConfig.Database, "MySQL database name")
 
 	flag.IntVar(&flagConfig.RetentionDays, "mysql-retention-days", DefaultConfig.RetentionDays, "Days of history to keep")
-	flag.StringVar(&flagConfig.LegacyTable, "mysql-legacy-table", DefaultConfig.LegacyTable, "Table written by versions before 0.3, read for older history and purged (e.g. events)")
 	flag.IntVar(&flagConfig.FacetSample, "mysql-facet-sample", DefaultConfig.FacetSample, "Most recent matching rows scanned for facets and filtered histograms")
 	flag.IntVar(&flagConfig.MaxOpenConns, "mysql-max-open-conns", DefaultConfig.MaxOpenConns, "Connection pool size")
 	flag.StringVar(&flagConfig.Params, "mysql-params", DefaultConfig.Params, "Extra driver parameters appended to the connection string (e.g. tls=skip-verify&allowCleartextPasswords=true)")

@@ -5,7 +5,6 @@ interface Props {
   data: FacetsResponse | null
   error: string | null
   filters: Filter[]
-  legacyCount: number
   outageCount: number
   allDatacenters: boolean
   onToggle: (field: string, value: string, not: boolean) => void
@@ -35,7 +34,7 @@ function label(field: string, value: string) {
   return value
 }
 
-export function Facets({ data, error, filters, legacyCount, outageCount, allDatacenters, onToggle }: Props) {
+export function Facets({ data, error, filters, outageCount, allDatacenters, onToggle }: Props) {
   const active = (field: string, value: string) => {
     const f = filters.find((x) => x.field === field && x.value === value)
     return f ? (f.not ? 'off' : 'on') : ''
@@ -52,8 +51,8 @@ export function Facets({ data, error, filters, legacyCount, outageCount, allData
           </span>
         )}
       </div>
-      {error && <div className="legacynote err">{error}</div>}
-      {data?.sampled && <div className="legacynote">Counts come from the {data.sample_size.toLocaleString()} most recent matching events.</div>}
+      {error && <div className="note err">{error}</div>}
+      {data?.sampled && <div className="note">Counts come from the {data.sample_size.toLocaleString()} most recent matching events.</div>}
       {GROUPS.map(([field, title]) => {
         const values = data?.facets[field] ?? []
         if (!values.length || (field === 'dc' && !allDatacenters)) return null
@@ -80,12 +79,7 @@ export function Facets({ data, error, filters, legacyCount, outageCount, allData
           </div>
         )
       })}
-      {allDatacenters && <div className="legacynote">History across every datacenter. The live tail only exists per datacenter.</div>}
-      {legacyCount > 0 && (
-        <div className="legacynote">
-          <b>{legacyCount.toLocaleString()}</b> loaded rows predate this version. They keep time, node, service, check, statuses, counts and output; tags, team, version, check type and id are not available for them.
-        </div>
-      )}
+      {allDatacenters && <div className="note">History across every datacenter. The live tail only exists per datacenter.</div>}
     </aside>
   )
 }

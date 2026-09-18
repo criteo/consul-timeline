@@ -11,7 +11,6 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
-	"sync"
 	"time"
 
 	_ "github.com/go-sql-driver/mysql"
@@ -23,21 +22,15 @@ import (
 var _ storage.Storage = (*Storage)(nil)
 
 const (
-	maxOutput      = 4096
-	insertChunk    = 500
-	upsertChunk    = 200
-	cutoverRefresh = time.Minute
-	maintainLock   = "consul_timeline_maintain"
+	maxOutput    = 4096
+	insertChunk  = 500
+	upsertChunk  = 200
+	maintainLock = "consul_timeline_maintain"
 )
 
 type Storage struct {
-	cfg    Config
-	db     *sql.DB
-	legacy *legacyReader
-
-	cutoverMu   sync.Mutex
-	cutoverAt   time.Time
-	cutoverTime time.Time
+	cfg Config
+	db  *sql.DB
 }
 
 // New opens the database and, when configured, creates the schema.
@@ -67,13 +60,6 @@ func New(cfg Config) (*Storage, error) {
 			}
 		}
 	}
-	if cfg.LegacyTable != "" {
-		if !validIdentifier(cfg.LegacyTable) {
-			return nil, fmt.Errorf("mysql: invalid legacy table name %q", cfg.LegacyTable)
-		}
-		s.legacy = &legacyReader{db: db, table: cfg.LegacyTable}
-		slog.Info("mysql: serving history from the legacy table too", "table", cfg.LegacyTable)
-	}
 	return s, nil
 }
 
@@ -86,19 +72,6 @@ func (cfg Config) dsn() string {
 		dsn += "&" + cfg.Params
 	}
 	return dsn
-}
-
-func validIdentifier(s string) bool {
-	if s == "" || len(s) > 64 {
-		return false
-	}
-	for _, r := range s {
-		ok := r == '_' || r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9'
-		if !ok {
-			return false
-		}
-	}
-	return true
 }
 
 // ---- writes ---------------------------------------------------------------
@@ -245,9 +218,9 @@ func jsonOrNull(v any) any {
 // ---- maintenance ----------------------------------------------------------
 
 // Maintain creates the partitions for yesterday, today and tomorrow, drops
-// the ones past retention, prunes rollups and instances, and purges the
-// legacy table. Instances of every datacenter share the tables, so the
-// work is serialized on a MySQL named lock and every step is idempotent.
+// the ones past retention and prunes rollups and instances. Instances of
+// every datacenter share the tables, so the work is serialized on a MySQL
+// named lock and every step is idempotent.
 func (s *Storage) Maintain(ctx context.Context) error {
 	conn, err := s.db.Conn(ctx)
 	if err != nil {
@@ -279,11 +252,6 @@ func (s *Storage) Maintain(ctx context.Context) error {
 	}
 	if err := deleteBatches(ctx, conn, "DELETE FROM instances WHERE last_seen < ? LIMIT 10000", cutoff); err != nil {
 		errs = append(errs, fmt.Errorf("instances retention: %w", err))
-	}
-	if s.legacy != nil {
-		if err := deleteBatches(ctx, conn, "DELETE FROM `"+s.legacy.table+"` WHERE time < ? LIMIT 50000", cutoff); err != nil {
-			errs = append(errs, fmt.Errorf("legacy retention: %w", err))
-		}
 	}
 	return errors.Join(errs...)
 }
@@ -373,27 +341,4 @@ func deleteBatches(ctx context.Context, conn *sql.Conn, stmt string, arg any) er
 		}
 	}
 	return nil
-}
-
-// cutover is the time of the first v2 row; legacy rows at or after it are
-// ignored so the two tables never overlap.
-func (s *Storage) cutover(ctx context.Context) time.Time {
-	s.cutoverMu.Lock()
-	defer s.cutoverMu.Unlock()
-	if time.Since(s.cutoverAt) < cutoverRefresh {
-		return s.cutoverTime
-	}
-	var t sql.NullTime
-	err := s.db.QueryRowContext(ctx, "SELECT time FROM events_v2 ORDER BY id ASC LIMIT 1").Scan(&t)
-	switch {
-	case err == nil && t.Valid:
-		s.cutoverTime = t.Time
-	case errors.Is(err, sql.ErrNoRows) || (err == nil && !t.Valid):
-		s.cutoverTime = time.Now()
-	default:
-		slog.Warn("mysql: cutover lookup", "err", err)
-		return time.Now()
-	}
-	s.cutoverAt = time.Now()
-	return s.cutoverTime
 }

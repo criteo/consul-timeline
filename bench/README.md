@@ -77,25 +77,10 @@ docker compose -f bench/compose.yaml exec consul-agent-1 consul maint -disable
 docker compose -f bench/compose.yaml restart timeline         # app restart: leader lock, watch resync
 ```
 
-## Real history
-
-Import recent events from a live instance of the previous version into
-the bench database. The source is read only, the rows land in the v1
-`events` table exactly as that version stores them, so the legacy reader
-can be tested on genuine data:
-
-```bash
-go run ./bench/import -source https://consul-timeline.example.net -since 6h
-```
-
-Six hours of a busy datacenter is a few hundred thousand rows and takes
-about a minute. Rows keep their real datacenter; `-dc bench` relabels them
-to the local cluster's.
-
 ## Running the app on the host
 
 ```bash
-go run . -consul 127.0.0.1:8500 -storage mysql -mysql-host 127.0.0.1 -mysql-user timeline -mysql-password timeline -mysql-db consul_timeline_db -mysql-setup-schema -mysql-legacy-table events -listen :8889
+go run . -consul 127.0.0.1:8500 -storage mysql -mysql-host 127.0.0.1 -mysql-user timeline -mysql-password timeline -mysql-db consul_timeline_db -mysql-setup-schema -listen :8889
 ```
 
 Consul servers are discovered from the catalog and reached on their
@@ -105,6 +90,5 @@ container IP, which Linux routes directly.
 
 `spike/` holds the schema experiments run on this bench: `events_v2.sql`
 exercises daily partitions, JSON columns and page compression on a draft
-of the v2 table; `measure.sql` copies the v1 rows into candidate layouts
-and reports bytes per row. Both work on tables named `spike_*`, never on
-the tables the app owns.
+of the v2 table. It works on tables named `spike_*`, never on the tables
+the app owns.

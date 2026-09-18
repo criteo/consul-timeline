@@ -132,7 +132,6 @@ export function RangePopover({ range, tz, retentionDays, onRange, onTz, onClose 
         <span>
           Retention {retentionDays} days · oldest stored event about <b>{fmtDateShort(now - retentionDays * 86400e3, tz)}</b>
         </span>
-        <span>Rows marked legacy come from the previous version and carry fewer fields</span>
       </div>
       {error && <div className="hint err">{error}</div>}
     </div>

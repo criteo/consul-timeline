@@ -52,13 +52,10 @@ type Query struct {
 	Limit      int
 }
 
-// Cursor is a position in the newest-first ordering: the last row seen. ID
-// is 0 for rows without one, in which case Skip counts the rows already
-// returned at exactly Time.
+// Cursor is a position in the newest-first ordering: the last row seen.
 type Cursor struct {
 	Time time.Time
 	ID   int64
-	Skip int
 }
 
 func (c Cursor) IsZero() bool { return c.Time.IsZero() }
@@ -68,7 +65,7 @@ func (c Cursor) String() string {
 	if c.IsZero() {
 		return ""
 	}
-	return base64.RawURLEncoding.EncodeToString([]byte(fmt.Sprintf("%d:%d:%d", c.Time.UnixMilli(), c.ID, c.Skip)))
+	return base64.RawURLEncoding.EncodeToString([]byte(fmt.Sprintf("%d:%d", c.Time.UnixMilli(), c.ID)))
 }
 
 func ParseCursor(s string) (Cursor, error) {
@@ -80,16 +77,15 @@ func ParseCursor(s string) (Cursor, error) {
 		return Cursor{}, errors.New("malformed cursor")
 	}
 	parts := strings.Split(string(b), ":")
-	if len(parts) != 3 {
+	if len(parts) != 2 {
 		return Cursor{}, errors.New("malformed cursor")
 	}
 	ms, err1 := strconv.ParseInt(parts[0], 10, 64)
 	id, err2 := strconv.ParseInt(parts[1], 10, 64)
-	skip, err3 := strconv.Atoi(parts[2])
-	if err1 != nil || err2 != nil || err3 != nil {
+	if err1 != nil || err2 != nil {
 		return Cursor{}, errors.New("malformed cursor")
 	}
-	return Cursor{Time: time.UnixMilli(ms).UTC(), ID: id, Skip: skip}, nil
+	return Cursor{Time: time.UnixMilli(ms).UTC(), ID: id}, nil
 }
 
 // Page is one page of events plus where the next one starts.
