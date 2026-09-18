@@ -14,9 +14,15 @@ type WriterConfig struct {
 	FlushInterval time.Duration
 }
 
+// shutdownFlushTimeout bounds the last flush once ctx is cancelled; the
+// caller waits a little longer than this before giving up on the writer.
+const shutdownFlushTimeout = 5 * time.Second
+
 // RunWriter drains the watcher's channels into w in batches, so that the
 // watcher never waits on the database and bursts become few large inserts.
 // A batch that still fails after a few retries is dropped and counted.
+// When ctx is cancelled, whatever is queued gets one last flush with its
+// own deadline, so a shutdown does not lose the events already received.
 func RunWriter(ctx context.Context, w Writer, events <-chan tl.Event, instances <-chan tl.Instance, cfg WriterConfig) {
 	if cfg.BatchSize <= 0 {
 		cfg.BatchSize = 500
@@ -30,7 +36,7 @@ func RunWriter(ctx context.Context, w Writer, events <-chan tl.Event, instances 
 	ticker := time.NewTicker(cfg.FlushInterval)
 	defer ticker.Stop()
 
-	flush := func() {
+	flush := func(ctx context.Context) {
 		if len(evBatch) > 0 {
 			batch := evBatch
 			persist(ctx, "events", len(batch), func(ctx context.Context) error { return w.StoreEvents(ctx, batch) })
@@ -43,23 +49,40 @@ func RunWriter(ctx context.Context, w Writer, events <-chan tl.Event, instances 
 		}
 	}
 
+	// drain takes what is already queued without waiting for more.
+	drain := func() {
+		for {
+			select {
+			case e := <-events:
+				evBatch = append(evBatch, e)
+			case i := <-instances:
+				instBatch = append(instBatch, i)
+			default:
+				return
+			}
+		}
+	}
+
 	for {
 		select {
 		case <-ctx.Done():
-			flush()
+			drain()
+			last, cancel := context.WithTimeout(context.Background(), shutdownFlushTimeout)
+			flush(last)
+			cancel()
 			return
 		case e := <-events:
 			evBatch = append(evBatch, e)
 			if len(evBatch) >= cfg.BatchSize {
-				flush()
+				flush(ctx)
 			}
 		case i := <-instances:
 			instBatch = append(instBatch, i)
 			if len(instBatch) >= cfg.BatchSize {
-				flush()
+				flush(ctx)
 			}
 		case <-ticker.C:
-			flush()
+			flush(ctx)
 		}
 	}
 }
