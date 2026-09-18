@@ -62,7 +62,7 @@ export function Drawer({ event: e, tz, onClose, onAddFilter, onAround, onNotice 
     return () => ctl.abort()
   }, [e.datacenter, e.node_name, e.service_id])
 
-  const tags = e.tags ?? instance?.tags ?? [] // legacy rows only have the registry's
+  const tags = e.tags ?? instance?.tags ?? []
   const meta = instance?.meta ?? {}
   const nodeMeta = instance?.node_meta ?? {}
 
@@ -73,12 +73,6 @@ export function Drawer({ event: e, tz, onClose, onAddFilter, onAround, onNotice 
           <h3>{e.kind === KIND_NODE ? e.node_name : e.service_name}</h3>
           <div className="sub">
             {fmtFull(ms, tz)} · {fmtRel(ms)}
-            {e.legacy && (
-              <>
-                {' · '}
-                <span className="tag legacy">legacy row</span>
-              </>
-            )}
           </div>
         </div>
         <button className="ghost" onClick={onClose} title="Close (Esc)">

@@ -5,7 +5,7 @@ import (
 	"strings"
 )
 
-// Schema creates the v2 tables. events_v2 is partitioned by day so that
+// Schema creates the tables. events_v2 is partitioned by day so that
 // retention is a partition drop; the catch-all p_max guarantees inserts
 // never fail and is reorganized into the next day's partition by Maintain.
 // Page compression cuts the on-disk size by about four on real rows.
@@ -77,33 +77,6 @@ PARTITION BY RANGE (TO_DAYS(time)) (PARTITION p_max VALUES LESS THAN MAXVALUE)`,
   n          INT UNSIGNED NOT NULL,
   PRIMARY KEY (dc, minute, kind, new_status)
 ) ENGINE=InnoDB`,
-}
-
-// LegacySchema is the table written by versions before 0.3. It is kept so
-// the bench can create it and so the legacy reader knows its shape.
-var LegacySchema = []string{
-	`CREATE TABLE IF NOT EXISTS events (
-    time DATETIME,
-    datacenter VARCHAR(50),
-    node_name VARCHAR(255),
-    node_ip VARCHAR(45),
-    old_node_status TINYINT,
-    new_node_status TINYINT,
-    service_name VARCHAR(255),
-    service_id VARCHAR(255),
-    old_service_status TINYINT,
-    new_service_status TINYINT,
-    old_instance_count INT,
-    new_instance_count INT,
-    check_name  VARCHAR(255),
-    old_check_status TINYINT,
-    new_check_status TINYINT,
-    check_output VARCHAR(2048)
-) CHARSET=utf8`,
-	"CREATE INDEX IF NOT EXISTS time_idx ON events (`time` DESC)",
-	"CREATE INDEX IF NOT EXISTS time_service_idx ON events (`time` DESC, `service_name`)",
-	"CREATE INDEX IF NOT EXISTS time_node_idx ON events (`time` DESC, `node_name`)",
-	"CREATE INDEX IF NOT EXISTS time_node_service_idx ON events (`time` DESC, `service_name`, `node_name`)",
 }
 
 func PrintSchema() {

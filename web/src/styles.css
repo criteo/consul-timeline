@@ -523,7 +523,7 @@ a {
   color: var(--crit);
   text-decoration: line-through;
 }
-.legacynote {
+.note {
   margin: 8px 12px;
   padding: 8px;
   border: 1px dashed var(--line);
@@ -639,12 +639,6 @@ a {
 .row.outage {
   box-shadow: inset 3px 0 0 var(--crit);
 }
-.row.legacy {
-  box-shadow: inset 3px 0 0 var(--line);
-}
-.row.legacy.outage {
-  box-shadow: inset 3px 0 0 var(--crit);
-}
 .st {
   display: inline-flex;
   align-items: center;
@@ -728,9 +722,6 @@ a {
 .tag.click:hover {
   color: var(--text);
   border-color: var(--text);
-}
-.tag.legacy {
-  border-style: dashed;
 }
 .dcb {
   font-weight: 600;

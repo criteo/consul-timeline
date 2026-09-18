@@ -117,10 +117,6 @@ type Event struct {
 	OldCheckStatus Status `json:"old_check_status,omitempty"`
 	NewCheckStatus Status `json:"new_check_status,omitempty"`
 	CheckOutput    string `json:"check_output,omitempty"`
-
-	// Legacy marks rows read from the previous version's table: they have
-	// no id, team, version, check id or type, and second-precision time.
-	Legacy bool `json:"legacy,omitempty"`
 }
 
 // OldStatus is the headline status before the event, according to Kind.

@@ -41,8 +41,6 @@ export interface Event {
   old_check_status?: number
   new_check_status?: number
   check_output?: string
-
-  legacy?: boolean
 }
 
 export function oldStatus(e: Event): number {

@@ -193,49 +193,32 @@ func (s *Storage) Events(ctx context.Context, q storage.Query) (storage.Page, er
 	now := time.Now()
 	var page storage.Page
 
-	if q.Cursor.IsZero() || q.Cursor.ID > 0 {
-		where, args := buildWhere(q, now)
-		if q.Cursor.ID > 0 {
-			where += " AND (time < ? OR (time = ? AND id < ?))"
-			args = append(args, q.Cursor.Time.UTC(), q.Cursor.Time.UTC(), q.Cursor.ID)
-		}
-		args = append(args, limit+1)
-		rows, err := s.db.QueryContext(ctx, "SELECT "+selectCols+" FROM events_v2 WHERE "+where+" ORDER BY time DESC, id DESC LIMIT ?", args...)
-		if err != nil {
-			return page, fmt.Errorf("mysql events: %w", err)
-		}
-		defer func() { _ = rows.Close() }()
-		for rows.Next() {
-			e, err := scanEvent(rows)
-			if err != nil {
-				return page, err
-			}
-			page.Events = append(page.Events, e)
-		}
-		if err := rows.Err(); err != nil {
-			return page, err
-		}
-		if len(page.Events) > limit {
-			page.Events = page.Events[:limit]
-			last := page.Events[limit-1]
-			page.Next = storage.Cursor{Time: last.Time, ID: last.ID}
-			page.HasMore = true
-			return page, nil
-		}
+	where, args := buildWhere(q, now)
+	if !q.Cursor.IsZero() {
+		where += " AND (time < ? OR (time = ? AND id < ?))"
+		args = append(args, q.Cursor.Time.UTC(), q.Cursor.Time.UTC(), q.Cursor.ID)
 	}
-
-	if s.legacy != nil && len(page.Events) < limit {
-		var cursor storage.Cursor
-		if !q.Cursor.IsZero() && q.Cursor.ID == 0 {
-			cursor = q.Cursor // continuing inside the legacy table
-		}
-		evs, next, more, err := s.legacy.events(ctx, q, s.cutover(ctx), cursor, limit-len(page.Events))
+	args = append(args, limit+1)
+	rows, err := s.db.QueryContext(ctx, "SELECT "+selectCols+" FROM events_v2 WHERE "+where+" ORDER BY time DESC, id DESC LIMIT ?", args...)
+	if err != nil {
+		return page, fmt.Errorf("mysql events: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	for rows.Next() {
+		e, err := scanEvent(rows)
 		if err != nil {
 			return page, err
 		}
-		page.Events = append(page.Events, evs...)
-		page.Next = next
-		page.HasMore = more
+		page.Events = append(page.Events, e)
+	}
+	if err := rows.Err(); err != nil {
+		return page, err
+	}
+	if len(page.Events) > limit {
+		page.Events = page.Events[:limit]
+		last := page.Events[limit-1]
+		page.Next = storage.Cursor{Time: last.Time, ID: last.ID}
+		page.HasMore = true
 	}
 	return page, nil
 }
@@ -309,22 +292,6 @@ func (s *Storage) Histogram(ctx context.Context, q storage.Query, buckets int, s
 		out[i].Total += count
 		out[i].By[key] += count
 	}
-	// rows of the previous version's table count too, for the part of the
-	// range before the cutover, when its columns can evaluate the filters
-	finish := func(sampled bool, err error) ([]storage.Bucket, bool, error) {
-		if err != nil {
-			return nil, false, err
-		}
-		if s.legacy != nil {
-			if cut := s.cutover(ctx); from.Before(cut) {
-				if _, lerr := s.legacy.histogram(ctx, q, cut, from, width, split, add); lerr != nil {
-					return nil, false, lerr
-				}
-			}
-		}
-		return out, sampled, nil
-	}
-
 	if useRollup {
 		conds, args := "minute BETWEEN ? AND ?", []any{from.Truncate(time.Minute), to}
 		if q.Datacenter != "" {
@@ -350,7 +317,7 @@ func (s *Storage) Histogram(ctx context.Context, q storage.Query, buckets int, s
 			}
 			add(minute, splitKey(split, key), count)
 		}
-		return finish(false, rows.Err())
+		return out, false, rows.Err()
 	}
 
 	where, args := buildWhere(q, now)
@@ -375,7 +342,7 @@ func (s *Storage) Histogram(ctx context.Context, q storage.Query, buckets int, s
 		total += count
 		add(from.Add(time.Duration(b)*width), splitKey(split, key), count)
 	}
-	return finish(total >= sample, rows.Err())
+	return out, total >= sample, rows.Err()
 }
 
 // rollupFilters reports whether the rollup table, which only carries the

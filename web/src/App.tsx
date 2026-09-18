@@ -187,7 +187,6 @@ export default function App() {
 
   // ---- render -----------------------------------------------------------------
 
-  const legacyCount = useMemo(() => events.events.filter((e) => e.legacy).length, [events.events])
   const outageCount = useMemo(() => events.events.filter((e) => e.old_healthy > 0 && e.new_healthy === 0).length, [events.events])
 
   return (
@@ -230,7 +229,6 @@ export default function App() {
             data={facets.data}
             error={facets.error}
             filters={state.filters}
-            legacyCount={legacyCount}
             outageCount={outageCount}
             allDatacenters={allDcs}
             onToggle={toggleFilter}

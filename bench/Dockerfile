@@ -15,8 +15,7 @@ RUN go mod download
 COPY . .
 COPY --from=ui /src/public/dist/ ./public/dist/
 RUN make release OUT=/out/consul-timeline GOARCH=$(go env GOARCH) \
- && CGO_ENABLED=0 go build -o /out/bench-loadgen ./bench/loadgen \
- && CGO_ENABLED=0 go build -o /out/bench-import ./bench/import
+ && CGO_ENABLED=0 go build -o /out/bench-loadgen ./bench/loadgen
 
 FROM alpine:3.20
 RUN apk add --no-cache ca-certificates curl

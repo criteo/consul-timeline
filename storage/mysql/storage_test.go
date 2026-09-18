@@ -35,12 +35,8 @@ func testStorage(t *testing.T) (*Storage, context.Context) {
 	_, err = admin.Exec("CREATE DATABASE " + name)
 	require.NoError(t, err)
 
-	s, err := New(Config{Host: host, Port: port, User: user, Password: pass, Database: name, SetupSchema: true, RetentionDays: 14, LegacyTable: "events", FacetSample: 1000, MaxOpenConns: 4})
+	s, err := New(Config{Host: host, Port: port, User: user, Password: pass, Database: name, SetupSchema: true, RetentionDays: 14, FacetSample: 1000, MaxOpenConns: 4})
 	require.NoError(t, err)
-	for _, q := range LegacySchema {
-		_, err := s.db.Exec(q)
-		require.NoError(t, err)
-	}
 	t.Cleanup(func() {
 		_ = s.Close()
 		_, _ = admin.Exec("DROP DATABASE " + name)
@@ -266,93 +262,6 @@ func TestMySQLMaintainPartitions(t *testing.T) {
 	require.NoError(t, s.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM events_v2 PARTITION ("+partitionName(today.AddDate(0, 0, -1))+")").Scan(&n))
 	require.Equal(t, 1, n)
 	require.NoError(t, s.Maintain(ctx), "maintenance is idempotent")
-}
-
-func TestMySQLLegacyContinuation(t *testing.T) {
-	s, ctx := testStorage(t)
-	legacyBase := time.Now().Add(-2 * time.Hour).Truncate(time.Second)
-	stmt := "INSERT INTO events (time, datacenter, node_name, node_ip, old_node_status, new_node_status, service_name, service_id, old_service_status, new_service_status, old_instance_count, new_instance_count, check_name, old_check_status, new_check_status, check_output) VALUES (?, 'dc1', ?, '10.0.0.1', 0, 0, ?, ?, 4, 2, 3, 2, ?, 4, 2, 'legacy output')"
-	for sec := 0; sec < 3; sec++ {
-		for i := 0; i < 4; i++ {
-			_, err := s.db.ExecContext(ctx, stmt, legacyBase.Add(time.Duration(sec)*time.Second), fmt.Sprintf("n%d", i), "web-frontend", fmt.Sprintf("kubernetes-pod-web-frontend-10.48.0.%d-80", i), fmt.Sprintf("check_%d", i))
-			require.NoError(t, err)
-		}
-	}
-	// one legacy row after the cutover must never show up
-	_, err := s.db.ExecContext(ctx, stmt, time.Now().Add(time.Minute), "nX", "web-frontend", "id", "check")
-	require.NoError(t, err)
-
-	now := time.Now().Truncate(time.Millisecond)
-	require.NoError(t, s.StoreEvents(ctx, []tl.Event{
-		event(now.Add(-2*time.Second), "dc1", "web-frontend", "http", tl.StatusCritical),
-		event(now.Add(-time.Second), "dc1", "web-frontend", "http", tl.StatusPassing),
-		event(now, "dc1", "web-frontend", "http", tl.StatusCritical),
-	}))
-
-	q := storage.Query{Datacenter: "dc1", From: legacyBase.Add(-time.Hour), Limit: 5}
-	var all []tl.Event
-	for pages := 0; pages < 10; pages++ {
-		page, err := s.Events(ctx, q)
-		require.NoError(t, err)
-		all = append(all, page.Events...)
-		if !page.HasMore {
-			break
-		}
-		q.Cursor = page.Next
-	}
-	require.Len(t, all, 15, "3 v2 rows then 12 legacy rows, no duplicates, none after the cutover")
-	for i, e := range all {
-		require.Equal(t, i >= 3, e.Legacy, "row %d", i)
-		if i > 0 {
-			require.False(t, e.Time.After(all[i-1].Time), "newest first across the boundary")
-		}
-	}
-	require.Equal(t, tl.KindCheck, all[5].Kind)
-	require.Empty(t, all[5].Tags, "legacy rows carry no tags")
-	require.Equal(t, 2, all[5].NewHealthy)
-
-	keys := map[string]bool{}
-	for _, e := range all[3:] {
-		k := e.NodeName + e.CheckName + e.Time.String()
-		require.False(t, keys[k], "duplicate legacy row %s", k)
-		keys[k] = true
-	}
-
-	// the same filter semantics apply to legacy rows
-	page, err := s.Events(ctx, storage.Query{Datacenter: "dc1", From: legacyBase.Add(-time.Hour), Limit: 50, Filters: []storage.Filter{{Field: storage.FieldNode, Values: []string{"n2"}}}})
-	require.NoError(t, err)
-	require.Len(t, page.Events, 3)
-	page, err = s.Events(ctx, storage.Query{Datacenter: "dc1", From: legacyBase.Add(-time.Hour), Limit: 50, Filters: []storage.Filter{{Field: storage.FieldTo, Values: []string{"critical"}}, {Field: storage.FieldCheck, Values: []string{"check_1"}, Not: true}}})
-	require.NoError(t, err)
-	require.Len(t, page.Events, 2+9, "to:critical keeps 2 v2 rows and 9 of 12 legacy rows")
-
-	// the histogram counts legacy rows too when the legacy table can evaluate the filters
-	total := func(q storage.Query) int {
-		buckets, _, err := s.Histogram(ctx, q, 20, storage.SplitStatus)
-		require.NoError(t, err)
-		n := 0
-		for _, b := range buckets {
-			n += b.Total
-		}
-		return n
-	}
-	span := storage.Query{Datacenter: "dc1", From: legacyBase.Add(-time.Hour), To: now.Add(time.Second)}
-	require.Equal(t, 15, total(span), "3 v2 rows and 12 legacy rows")
-	span.Filters = []storage.Filter{{Field: storage.FieldNode, Values: []string{"n2"}}}
-	require.Equal(t, 3, total(span), "node filter pushed down to the legacy table")
-	span.Filters = []storage.Filter{{Field: storage.FieldNode, Values: []string{"n2"}, Not: true}}
-	require.Equal(t, 3+9, total(span), "negated filters are pushed down too")
-	span.Filters = []storage.Filter{{Field: storage.FieldTo, Values: []string{"critical"}}}
-	require.Equal(t, 2, total(span), "a filter the legacy table cannot evaluate leaves only v2 rows")
-
-	span.Filters = nil
-	buckets, _, err := s.Histogram(ctx, span, 20, storage.SplitDatacenter)
-	require.NoError(t, err)
-	n := 0
-	for _, b := range buckets {
-		n += b.By["dc1"]
-	}
-	require.Equal(t, 15, n, "legacy rows count under their datacenter in a dc split")
 }
 
 func TestDSNParams(t *testing.T) {

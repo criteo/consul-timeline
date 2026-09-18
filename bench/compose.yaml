@@ -72,7 +72,6 @@ services:
       - -mysql-password=timeline
       - -mysql-db=consul_timeline_db
       - -mysql-setup-schema
-      - -mysql-legacy-table=events
       - -listen=:8888
       - -log-level=info
     ports:
